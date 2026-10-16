@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SYSTEM — Personal Leveling</title>
+<!--
+=========================================================
+  سجل إصلاح الأخطاء (v2):
+  1) السبب الجذري لمشكلة "الصلاة مش بتتحسب بس النقاط بتدخل":
+     كان سجل اليوم بيتهيأ كائن ناقص {xpGained:0} بدون prayers/mainQuests
+     فكان renderPrayers يرمي خطأ (Object.values(undefined)) ويوقِف updateUI
+     في النص → النقاط تتحفظ قبلها والصلاة لا. تم إصلاح التهيئة + حماية كل دوال العرض.
+  2) كل دالة عرض الآن معزولة بـ try/catch حتى لا يعطّل خطأ واحد باقي الأزرار.
+  3) إصلاح تاريخ اليوم: كان يستخدم toISOString (UTC) → الآن التاريخ المحلي للجهاز.
+  4) منع تكرار نقاط الصلاة عند التصحيح (علم prayerXP لكل فرض لكل يوم).
+  5) حالة الصلاة تُحفظ قبل منح النقاط لضمان اتساق البيانات.
+  6) حماية عند فشل تحميل Chart.js (أوفلاين) → رسالة بديلة بدل تعطيل التطبيق.
+  7) حماية تحليل أوقات الجدول من أي صيغة وقت خاطئة يكتبها المستخدم.
+  8) حقول ملاحظات التقرير لم تعد تُمسح أثناء الكتابة مع كل تحديث للواجهة.
+  9) تبديل المهام الجانبية يحافظ على المكتملة والخاصة ولا يكررها.
+  10) حذف مهمة خاصة يحذفها نهائيًا (كانت تعود في اليوم التالي).
+  11) إصلاح حساب السلسلة (Streak) ليعاد حسابه من السجل دائمًا بشكل صحيح.
+  12) الهدف الأسبوعي + صندوق SHADOW CHEST لهما منطق فتح/قفل أسبوعي حقيقي.
+  13) زر REST DAY أصبح Toggle (يمكن التراجع).
+  14) المؤثرات الصوتية وتقليل الحركة أصبحا فعّالين فعليًا.
+  15) المقدمة تظهر مرة واحدة فقط وتُعاد من الإعدادات (سلوك مطابق للمواصفات).
+=========================================================
+-->
+<meta name="theme-color" content="#6d28ff">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/cairo@latest/arabic-400-normal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/cairo@latest/arabic-700-normal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/orbitron@latest/latin-700-normal.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg-0:#05060a; --bg-1:#0a0d18; --bg-2:#111526; --bg-3:#1a1f38;
+  --neon-purple:#a855f7; --neon-blue:#3b82f6; --neon-cyan:#22d3ee;
+  --neon-gold:#fbbf24; --neon-green:#10b981; --neon-red:#ef4444;
+  --text:#e5e7ff; --text-dim:#8b92b8;
+  --border:rgba(168,85,247,.25); --glass:rgba(17,21,38,.6);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Cairo',system-ui,sans-serif;background:var(--bg-0);color:var(--text);
+  overflow-x:hidden;min-height:100vh;
+  background-image:
+    radial-gradient(circle at 20% 10%,rgba(168,85,247,.12),transparent 40%),
+    radial-gradient(circle at 80% 80%,rgba(59,130,246,.12),transparent 40%),
+    radial-gradient(circle at 50% 50%,rgba(34,211,238,.04),transparent 60%);
+}
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(rgba(168,85,247,.04) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(168,85,247,.04) 1px,transparent 1px);
+  background-size:40px 40px;
+  -webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);
+  mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);
+}
+body.reduce *,body.reduce *::before,body.reduce *::after{animation-duration:.001s!important;transition-duration:.001s!important}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}}
+.font-display{font-family:'Orbitron','Cairo',sans-serif;letter-spacing:.05em}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea,select{font-family:inherit}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg-1)}
+::-webkit-scrollbar-thumb{background:linear-gradient(var(--neon-purple),var(--neon-blue));border-radius:4px}
+
+#intro{position:fixed;inset:0;z-index:1000;background:radial-gradient(ellipse at center,#0a0d18 0%,#000 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .8s,visibility .8s}
+#intro.hidden{opacity:0;visibility:hidden;pointer-events:none}
+.intro-frame{position:relative;padding:60px 80px;text-align:center;border:1px solid rgba(168,85,247,.4);background:rgba(10,13,24,.6);backdrop-filter:blur(10px);box-shadow:0 0 60px rgba(168,85,247,.3),inset 0 0 60px rgba(59,130,246,.1)}
+.intro-frame::before,.intro-frame::after{content:'';position:absolute;width:30px;height:30px;border:2px solid var(--neon-purple)}
+.intro-frame::before{top:-2px;left:-2px;border-right:none;border-bottom:none}
+.intro-frame::after{bottom:-2px;right:-2px;border-left:none;border-top:none}
+.intro-title{font-family:'Orbitron',sans-serif;font-size:clamp(1.5rem,4vw,2.5rem);font-weight:700;color:var(--neon-purple);text-shadow:0 0 20px var(--neon-purple),0 0 40px rgba(168,85,247,.5);margin-bottom:30px;letter-spacing:.2em;opacity:0;animation:glitchIn 1s .3s forwards}
+.intro-line{font-family:'Orbitron',sans-serif;font-size:.9rem;color:var(--neon-cyan);margin:10px 0;letter-spacing:.15em;opacity:0;animation:fadeSlide .6s forwards}
+.intro-line:nth-child(2){animation-delay:1.2s}
+.intro-line:nth-child(3){animation-delay:1.8s}
+.intro-line:nth-child(4){animation-delay:2.4s}
+.intro-line::before{content:'> ';color:var(--neon-green)}
+.intro-skip{margin-top:40px;padding:10px 30px;border:1px solid var(--neon-blue);color:var(--neon-blue);font-family:'Orbitron',sans-serif;font-size:.8rem;letter-spacing:.2em;background:transparent;transition:all .3s;opacity:0;animation:fadeIn 1s 2.8s forwards}
+.intro-skip:hover{background:var(--neon-blue);color:#000;box-shadow:0 0 20px var(--neon-blue)}
+@keyframes glitchIn{0%{opacity:0;transform:translateY(-20px);filter:blur(10px)}50%{opacity:1;transform:translateY(0);filter:blur(0)}55%{transform:translateX(-3px);color:var(--neon-cyan)}60%{transform:translateX(3px);color:var(--neon-purple)}65%{transform:translateX(0);color:var(--neon-purple)}100%{opacity:1}}
+@keyframes fadeSlide{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@keyframes fadeIn{to{opacity:1}}
+
+#app{display:none;min-height:100vh;position:relative;z-index:1}
+#app.show{display:flex;animation:fadeIn .8s forwards}
+.sidebar{width:260px;min-height:100vh;background:linear-gradient(180deg,rgba(10,13,24,.95),rgba(5,6,10,.95));border-left:1px solid var(--border);padding:20px 0;position:fixed;right:0;top:0;display:flex;flex-direction:column;z-index:50;backdrop-filter:blur(10px);transition:transform .3s}
+.logo{padding:0 20px 20px;text-align:center;border-bottom:1px solid var(--border)}
+.logo h1{font-family:'Orbitron',sans-serif;font-size:1.6rem;font-weight:700;background:linear-gradient(135deg,var(--neon-purple),var(--neon-cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+.logo small{color:var(--text-dim);font-size:.7rem;letter-spacing:.3em;display:block;margin-top:4px}
+.nav{flex:1;padding:20px 0;display:flex;flex-direction:column;gap:4px}
+.nav-item{display:flex;align-items:center;gap:12px;padding:12px 20px;margin:0 10px;color:var(--text-dim);font-size:.95rem;border-radius:8px;transition:all .3s;cursor:pointer}
+.nav-item:hover{background:rgba(168,85,247,.08);color:var(--text)}
+.nav-item.active{background:linear-gradient(90deg,rgba(168,85,247,.2),transparent);color:var(--neon-purple);box-shadow:inset 3px 0 0 var(--neon-purple)}
+.nav-item .icon{font-size:1.2rem;width:24px;text-align:center}
+.sidebar-footer{padding:15px 20px;border-top:1px solid var(--border);font-size:.75rem;color:var(--text-dim);text-align:center}
+.main{flex:1;margin-right:260px;padding:20px 30px;min-height:100vh}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:15px 20px;margin-bottom:25px;background:var(--glass);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:12px;flex-wrap:wrap;gap:10px}
+.topbar-left{display:flex;align-items:center;gap:15px}
+.menu-btn{display:none;font-size:1.5rem;color:var(--neon-purple)}
+.topbar-title{font-family:'Orbitron',sans-serif;font-size:1.1rem;color:var(--neon-cyan);letter-spacing:.1em}
+.topbar-right{display:flex;align-items:center;gap:15px;flex-wrap:wrap}
+.mini-stat{display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(168,85,247,.1);border:1px solid var(--border);border-radius:8px;font-size:.85rem}
+.mini-stat .label{color:var(--text-dim);font-size:.7rem}
+.mini-stat .val{color:var(--neon-gold);font-weight:700;font-family:'Orbitron',sans-serif}
+.page{display:none;animation:pageIn .5s forwards}
+.page.active{display:block}
+@keyframes pageIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+.card{background:var(--glass);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px;position:relative;overflow:hidden;transition:all .3s}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--neon-purple),transparent);opacity:.5}
+.card:hover{border-color:rgba(168,85,247,.5);box-shadow:0 0 30px rgba(168,85,247,.15)}
+.card-title{font-family:'Orbitron',sans-serif;font-size:.9rem;color:var(--neon-purple);letter-spacing:.15em;margin-bottom:15px;display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.card-title .ic{font-size:1.2rem}
+.grid{display:grid;gap:20px}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.grid-4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+
+.hero{background:linear-gradient(135deg,rgba(168,85,247,.1),rgba(59,130,246,.08));border:1px solid var(--border);border-radius:16px;padding:30px;margin-bottom:25px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 80% 50%,rgba(168,85,247,.15),transparent 50%)}
+.hero-content{position:relative;z-index:1;display:flex;align-items:center;gap:25px;flex-wrap:wrap}
+.hero-avatar{width:100px;height:100px;border-radius:50%;background:linear-gradient(135deg,var(--neon-purple),var(--neon-blue));display:flex;align-items:center;justify-content:center;font-family:'Orbitron',sans-serif;font-size:2.5rem;font-weight:700;color:#fff;box-shadow:0 0 40px rgba(168,85,247,.5),inset 0 0 20px rgba(0,0,0,.3);position:relative;flex-shrink:0}
+.hero-avatar::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--neon-cyan);animation:spin 8s linear infinite;border-top-color:transparent;border-left-color:transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hero-info{flex:1;min-width:200px}
+.hero-name{font-family:'Orbitron',sans-serif;font-size:1.5rem;color:var(--text);margin-bottom:4px}
+.hero-rank{display:inline-block;padding:4px 12px;background:linear-gradient(90deg,var(--neon-purple),var(--neon-blue));border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.15em;margin-bottom:10px}
+.hero-level{font-family:'Orbitron',sans-serif;font-size:1.1rem;color:var(--neon-gold);margin-bottom:10px}
+.xp-bar-wrap{margin-top:10px}
+.xp-bar-info{display:flex;justify-content:space-between;font-size:.8rem;color:var(--text-dim);margin-bottom:6px}
+.xp-bar{height:12px;background:rgba(0,0,0,.5);border-radius:6px;overflow:hidden;border:1px solid var(--border);position:relative}
+.xp-bar-fill{height:100%;background:linear-gradient(90deg,var(--neon-purple),var(--neon-cyan));border-radius:6px;transition:width 1s cubic-bezier(.4,0,.2,1);position:relative;box-shadow:0 0 10px var(--neon-purple)}
+.xp-bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);animation:shimmer 2s infinite}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+
+.stat-card{background:var(--glass);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:12px;padding:18px;position:relative;overflow:hidden;transition:all .3s}
+.stat-card:hover{transform:translateY(-3px);box-shadow:0 10px 30px rgba(168,85,247,.2)}
+.stat-card .stat-ic{font-size:1.8rem;margin-bottom:8px}
+.stat-card .stat-label{font-size:.75rem;color:var(--text-dim);letter-spacing:.1em;margin-bottom:4px}
+.stat-card .stat-val{font-family:'Orbitron',sans-serif;font-size:1.8rem;font-weight:700;color:var(--neon-cyan)}
+.stat-card .stat-sub{font-size:.7rem;color:var(--text-dim);margin-top:4px}
+
+.attr-list{display:flex;flex-direction:column;gap:14px}
+.attr-item{display:flex;align-items:center;gap:12px}
+.attr-ic{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,rgba(168,85,247,.2),rgba(59,130,246,.1));border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+.attr-info{flex:1}
+.attr-name{display:flex;justify-content:space-between;margin-bottom:4px;font-size:.85rem;gap:8px}
+.attr-name .en{color:var(--neon-purple);font-family:'Orbitron',sans-serif;font-size:.7rem}
+.attr-bar{height:6px;background:rgba(0,0,0,.4);border-radius:3px;overflow:hidden}
+.attr-fill{height:100%;background:linear-gradient(90deg,var(--neon-purple),var(--neon-cyan));border-radius:3px;transition:width 1s}
+
+.quest{display:flex;align-items:center;gap:14px;padding:14px;margin-bottom:10px;background:rgba(10,13,24,.6);border:1px solid var(--border);border-radius:10px;transition:all .3s;flex-wrap:wrap}
+.quest:hover{border-color:rgba(168,85,247,.5)}
+.quest.done{opacity:.75;background:rgba(16,185,129,.05);border-color:rgba(16,185,129,.3)}
+.quest.done .quest-title{text-decoration:line-through;color:var(--text-dim)}
+.quest-check{width:28px;height:28px;border-radius:8px;border:2px solid var(--neon-purple);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .3s;flex-shrink:0;color:transparent;font-size:1rem}
+.quest:hover .quest-check{box-shadow:0 0 10px var(--neon-purple)}
+.quest.done .quest-check{background:var(--neon-green);border-color:var(--neon-green);color:#fff}
+.quest-body{flex:1;min-width:150px}
+.quest-title{font-size:.95rem;margin-bottom:2px}
+.quest-meta{font-size:.75rem;color:var(--text-dim);display:flex;gap:10px;flex-wrap:wrap}
+.quest-xp{padding:4px 10px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:6px;color:var(--neon-gold);font-family:'Orbitron',sans-serif;font-size:.75rem;font-weight:700;flex-shrink:0}
+.quest-actions{display:flex;gap:6px}
+.quest-action{width:28px;height:28px;border-radius:6px;background:rgba(168,85,247,.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:.8rem;color:var(--text-dim);transition:all .3s}
+.quest-action:hover{background:var(--neon-purple);color:#fff}
+
+.prayer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:15px}
+.prayer-card{background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;transition:all .3s;position:relative;overflow:hidden}
+.prayer-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--neon-purple),var(--neon-cyan));transform:scaleX(0);transition:transform .5s}
+.prayer-card.prayed::before{transform:scaleX(1)}
+.prayer-card.prayed{border-color:rgba(16,185,129,.4);background:rgba(16,185,129,.05)}
+.prayer-card.missed{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.05)}
+.prayer-ic{font-size:2.5rem;margin-bottom:10px}
+.prayer-name{font-family:'Orbitron',sans-serif;font-size:1rem;color:var(--neon-cyan);margin-bottom:4px;letter-spacing:.1em}
+.prayer-time{font-size:.75rem;color:var(--text-dim);margin-bottom:14px}
+.prayer-btns{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+.prayer-btn{padding:6px 12px;border-radius:6px;font-size:.8rem;border:1px solid var(--border);transition:all .3s}
+.prayer-btn.pray{color:var(--neon-green);border-color:rgba(16,185,129,.3)}
+.prayer-btn.pray:hover,.prayer-btn.pray.active{background:var(--neon-green);color:#fff}
+.prayer-btn.miss{color:var(--neon-red);border-color:rgba(239,68,68,.3)}
+.prayer-btn.miss:hover,.prayer-btn.miss.active{background:var(--neon-red);color:#fff}
+
+.exercise{display:flex;gap:15px;padding:15px;background:rgba(10,13,24,.6);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;align-items:center}
+.exercise-visual{width:60px;height:60px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,rgba(168,85,247,.2),rgba(59,130,246,.1));border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:1.8rem}
+.exercise-info{flex:1}
+.exercise-name{font-weight:700;margin-bottom:4px}
+.exercise-detail{font-size:.8rem;color:var(--text-dim)}
+
+.btn{padding:10px 20px;border-radius:8px;font-weight:700;transition:all .3s;display:inline-flex;align-items:center;gap:8px;font-size:.9rem}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:linear-gradient(135deg,var(--neon-purple),var(--neon-blue));color:#fff;box-shadow:0 0 20px rgba(168,85,247,.3)}
+.btn-primary:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 5px 25px rgba(168,85,247,.5)}
+.btn-ghost{background:rgba(168,85,247,.1);border:1px solid var(--border);color:var(--text)}
+.btn-ghost:hover:not(:disabled){background:rgba(168,85,247,.2)}
+.btn-danger{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--neon-red)}
+.btn-danger:hover{background:var(--neon-red);color:#fff}
+.btn-sm{padding:6px 12px;font-size:.8rem}
+
+.schedule-item{display:flex;gap:15px;padding:14px;background:rgba(10,13,24,.6);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;align-items:center;transition:all .3s;flex-wrap:wrap}
+.schedule-item.current{border-color:var(--neon-green);background:rgba(16,185,129,.08);box-shadow:0 0 20px rgba(16,185,129,.2)}
+.schedule-item.current .schedule-name::after{content:' ◀ الآن';color:var(--neon-green);font-size:.75rem}
+.schedule-time{font-family:'Orbitron',sans-serif;font-size:.85rem;color:var(--neon-cyan);min-width:110px}
+.schedule-ic{font-size:1.4rem}
+.schedule-name{flex:1;font-size:.95rem;min-width:120px}
+
+.reward-card{background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;transition:all .3s;position:relative;overflow:hidden}
+.reward-card:hover{transform:translateY(-5px);box-shadow:0 10px 30px rgba(168,85,247,.3)}
+.reward-ic{font-size:3rem;margin-bottom:10px;filter:drop-shadow(0 0 10px rgba(168,85,247,.5))}
+.reward-name{font-family:'Orbitron',sans-serif;font-size:.85rem;color:var(--neon-gold);letter-spacing:.1em;margin-bottom:6px}
+.reward-desc{font-size:.8rem;color:var(--text-dim)}
+
+.ach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:15px}
+.ach{padding:18px;background:var(--glass);border:1px solid var(--border);border-radius:12px;transition:all .3s;position:relative}
+.ach.locked{opacity:.4;filter:grayscale(1)}
+.ach.unlocked{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.05)}
+.ach-ic{font-size:2rem;margin-bottom:8px}
+.ach-name{font-family:'Orbitron',sans-serif;font-size:.85rem;color:var(--neon-gold);margin-bottom:4px;letter-spacing:.1em}
+.ach-desc{font-size:.8rem;color:var(--text-dim);margin-bottom:8px}
+.ach-cond{font-size:.7rem;color:var(--text-dim);font-style:italic;padding-top:8px;border-top:1px solid var(--border)}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);z-index:2000;display:none;align-items:center;justify-content:center;padding:20px;animation:fadeIn .3s}
+.modal-overlay.show{display:flex}
+.modal{background:linear-gradient(135deg,var(--bg-2),var(--bg-1));border:1px solid var(--neon-purple);border-radius:16px;padding:30px;max-width:500px;width:100%;box-shadow:0 0 60px rgba(168,85,247,.4);animation:modalIn .4s;position:relative;max-height:85vh;overflow-y:auto}
+@keyframes modalIn{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
+.modal-close{position:absolute;top:15px;left:15px;font-size:1.3rem;color:var(--text-dim);cursor:pointer;line-height:1}
+.modal-title{font-family:'Orbitron',sans-serif;font-size:1.1rem;color:var(--neon-purple);margin-bottom:15px;letter-spacing:.1em}
+
+#notifications{position:fixed;top:20px;left:20px;z-index:1500;display:flex;flex-direction:column;gap:10px;pointer-events:none;max-width:calc(100vw - 40px)}
+.notif{background:linear-gradient(135deg,rgba(17,21,38,.95),rgba(10,13,24,.95));border:1px solid var(--neon-purple);border-radius:10px;padding:14px 20px;min-width:240px;max-width:340px;box-shadow:0 0 30px rgba(168,85,247,.4);animation:notifIn .4s,notifOut .4s 3.6s forwards;backdrop-filter:blur(10px)}
+.notif.success{border-color:var(--neon-green);box-shadow:0 0 30px rgba(16,185,129,.4)}
+.notif.gold{border-color:var(--neon-gold);box-shadow:0 0 30px rgba(251,191,36,.4)}
+.notif-title{font-family:'Orbitron',sans-serif;font-size:.85rem;color:var(--neon-cyan);letter-spacing:.1em;margin-bottom:4px}
+.notif.success .notif-title{color:var(--neon-green)}
+.notif.gold .notif-title{color:var(--neon-gold)}
+.notif-body{font-size:.85rem;color:var(--text)}
+@keyframes notifIn{from{transform:translateX(-100%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes notifOut{to{transform:translateX(-100%);opacity:0}}
+
+#levelup{position:fixed;inset:0;z-index:3000;background:radial-gradient(ellipse at center,rgba(168,85,247,.3),rgba(0,0,0,.95));display:none;align-items:center;justify-content:center;flex-direction:column}
+#levelup.show{display:flex;animation:fadeIn .5s}
+.levelup-content{text-align:center;animation:levelupIn 1s}
+@keyframes levelupIn{0%{transform:scale(0);opacity:0}50%{transform:scale(1.2)}100%{transform:scale(1);opacity:1}}
+.levelup-label{font-family:'Orbitron',sans-serif;font-size:1rem;color:var(--neon-cyan);letter-spacing:.3em;margin-bottom:20px;animation:pulse 1.5s infinite}
+.levelup-num{font-family:'Orbitron',sans-serif;font-size:6rem;font-weight:700;background:linear-gradient(135deg,var(--neon-gold),var(--neon-purple));-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:20px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.particles{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.particle{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--neon-gold);box-shadow:0 0 10px var(--neon-gold);animation:particle 2s ease-out forwards}
+@keyframes particle{0%{transform:translate(0,0) scale(1);opacity:1}100%{transform:translate(var(--tx),var(--ty)) scale(0);opacity:0}}
+
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--border);gap:15px;flex-wrap:wrap}
+.setting-row:last-child{border-bottom:none}
+.setting-label{font-size:.95rem}
+.setting-desc{font-size:.75rem;color:var(--text-dim);margin-top:2px}
+.switch{width:44px;height:24px;background:rgba(0,0,0,.4);border:1px solid var(--border);border-radius:12px;position:relative;cursor:pointer;transition:all .3s;flex-shrink:0}
+.switch::after{content:'';position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:var(--text-dim);transition:all .3s}
+.switch.on{background:rgba(168,85,247,.3);border-color:var(--neon-purple)}
+.switch.on::after{right:22px;background:var(--neon-purple);box-shadow:0 0 10px var(--neon-purple)}
+.input{width:100%;padding:10px 14px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;transition:all .3s}
+.input:focus{outline:none;border-color:var(--neon-purple);box-shadow:0 0 10px rgba(168,85,247,.3)}
+textarea.input{resize:vertical;min-height:80px}
+
+.tabs{display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:10px}
+.tab{padding:8px 16px;border-radius:8px;font-size:.85rem;color:var(--text-dim);transition:all .3s;border:1px solid transparent}
+.tab:hover{color:var(--text)}
+.tab.active{background:rgba(168,85,247,.15);color:var(--neon-purple);border-color:var(--border)}
+.chart-wrap{position:relative;height:300px}
+.chart-fallback{height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-dim);text-align:center;padding:20px;border:1px dashed var(--border);border-radius:10px;font-size:.9rem}
+
+.report-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:10px}
+.report-row:last-child{border-bottom:none}
+.report-label{color:var(--text-dim)}
+.report-val{font-family:'Orbitron',sans-serif;color:var(--neon-cyan)}
+
+.text-center{text-align:center}
+.mt-10{margin-top:10px}.mt-20{margin-top:20px}
+.mb-10{margin-bottom:10px}.mb-20{margin-bottom:20px}
+.flex{display:flex}.gap-10{gap:10px}.gap-20{gap:20px}
+.flex-wrap{flex-wrap:wrap}.items-center{align-items:center}.justify-between{justify-content:space-between}
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:.7rem;font-weight:700;letter-spacing:.1em}
+.badge-purple{background:rgba(168,85,247,.2);color:var(--neon-purple);border:1px solid var(--border)}
+.badge-gold{background:rgba(251,191,36,.15);color:var(--neon-gold);border:1px solid rgba(251,191,36,.3)}
+.badge-green{background:rgba(16,185,129,.15);color:var(--neon-green);border:1px solid rgba(16,185,129,.3)}
+.hidden{display:none!important}
+
+@media(max-width:900px){
+  .sidebar{transform:translateX(100%)}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-right:0;padding:15px}
+  .menu-btn{display:block}
+  .hero-content{flex-direction:column;text-align:center}
+}
+@media(max-width:500px){
+  .topbar{flex-direction:column;align-items:stretch}
+  .topbar-right{justify-content:space-around}
+  .intro-frame{padding:40px 25px}
+}
+</style>
+</head>
+<body>
+
+<div id="intro">
+  <div class="intro-frame">
+    <div class="intro-title">SYSTEM INITIALIZED</div>
+    <div class="intro-line">PLAYER STATUS: ACTIVE</div>
+    <div class="intro-line">DAILY QUESTS: AVAILABLE</div>
+    <div class="intro-line">WELCOME, AMR</div>
+    <button class="intro-skip" id="btn-skip">SKIP INTRO</button>
+  </div>
+</div>
+
+<div id="levelup">
+  <div class="particles" id="particles"></div>
+  <div class="levelup-content">
+    <div class="levelup-label">⚡ LEVEL UP ⚡</div>
+    <div class="levelup-num" id="levelup-num">2</div>
+    <div style="color:var(--neon-cyan);font-family:'Orbitron',sans-serif;letter-spacing:.2em">NEW RANK UNLOCKED</div>
+    <button class="btn btn-primary mt-20" id="btn-levelup-ok">CONTINUE</button>
+  </div>
+</div>
+
+<div id="notifications"></div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <span class="modal-close" id="modal-close">✕</span>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<div id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo"><h1>SYSTEM</h1><small>PERSONAL LEVELING</small></div>
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-page="dashboard"><span class="icon">⚡</span>لوحة التحكم</div>
+      <div class="nav-item" data-page="quests"><span class="icon">📜</span>المهام اليومية</div>
+      <div class="nav-item" data-page="side"><span class="icon">🎯</span>المهام الجانبية</div>
+      <div class="nav-item" data-page="prayer"><span class="icon">🕌</span>متتبع الصلاة</div>
+      <div class="nav-item" data-page="workout"><span class="icon">💪</span>التمرين المنزلي</div>
+      <div class="nav-item" data-page="schedule"><span class="icon">⏰</span>الجدول اليومي</div>
+      <div class="nav-item" data-page="rewards"><span class="icon">🎁</span>المكافآت</div>
+      <div class="nav-item" data-page="achievements"><span class="icon">🏆</span>الإنجازات</div>
+      <div class="nav-item" data-page="progress"><span class="icon">📊</span>التقدم</div>
+      <div class="nav-item" data-page="report"><span class="icon">📋</span>تقرير اليوم</div>
+      <div class="nav-item" data-page="settings"><span class="icon">⚙️</span>الإعدادات</div>
+    </nav>
+    <div class="sidebar-footer">SYSTEM v2.0 — PLAYER: AMR</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" id="menu-btn">☰</button>
+        <div class="topbar-title" id="page-title">DASHBOARD</div>
+      </div>
+      <div class="topbar-right">
+        <div class="mini-stat"><span class="label">LVL</span><span class="val" id="top-lvl">1</span></div>
+        <div class="mini-stat"><span class="label">XP</span><span class="val" id="top-xp">0</span></div>
+        <div class="mini-stat"><span class="label">STREAK</span><span class="val" id="top-streak">0</span></div>
+      </div>
+    </div>
+
+    <section class="page active" id="page-dashboard">
+      <div class="hero">
+        <div class="hero-content">
+          <div class="hero-avatar">A</div>
+          <div class="hero-info">
+            <div class="hero-name">AMR</div>
+            <div class="hero-rank" id="hero-rank">E-RANK</div>
+            <div class="hero-level">LEVEL <span id="hero-level">1</span></div>
+            <div class="xp-bar-wrap">
+              <div class="xp-bar-info">
+                <span>XP: <span id="xp-current">0</span> / <span id="xp-needed">100</span></span>
+                <span id="xp-percent">0%</span>
+              </div>
+              <div class="xp-bar"><div class="xp-bar-fill" id="xp-fill" style="width:0%"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="grid grid-4 mb-20">
+        <div class="stat-card"><div class="stat-ic">💎</div><div class="stat-label">TOTAL XP</div><div class="stat-val" id="s-totalxp">0</div><div class="stat-sub">إجمالي النقاط</div></div>
+        <div class="stat-card"><div class="stat-ic">🔥</div><div class="stat-label">STREAK</div><div class="stat-val" id="s-streak">0</div><div class="stat-sub">أيام الالتزام</div></div>
+        <div class="stat-card"><div class="stat-ic">✅</div><div class="stat-label">TODAY</div><div class="stat-val" id="s-today">0</div><div class="stat-sub">مهام اليوم</div></div>
+        <div class="stat-card"><div class="stat-ic">🏆</div><div class="stat-label">ACHIEVEMENTS</div><div class="stat-val" id="s-ach">0</div><div class="stat-sub">إنجازات مفتوحة</div></div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-title"><span class="ic">👤</span>PLAYER STATUS</div>
+          <div class="attr-list" id="attr-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ic">📊</span>نظرة سريعة</div>
+          <div class="report-row"><span class="report-label">الصلوات اليوم</span><span class="report-val" id="q-prayers">0/5</span></div>
+          <div class="report-row"><span class="report-label">التمرين اليوم</span><span class="report-val" id="q-workout">—</span></div>
+          <div class="report-row"><span class="report-label">المهام الجانبية</span><span class="report-val" id="q-side">0/3</span></div>
+          <div class="report-row"><span class="report-label">الالتزام الأسبوعي</span><span class="report-val" id="q-weekly">0%</span></div>
+          <div class="report-row"><span class="report-label">الرتبة الحالية</span><span class="report-val" id="q-rank">E-RANK</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">📜</span>مهام اليوم السريعة</div>
+        <div id="dash-quests"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-quests">
+      <div class="card">
+        <div class="card-title"><span class="ic">📜</span>المهام اليومية الأساسية</div>
+        <div id="main-quests"></div>
+        <button class="btn btn-ghost mt-10" id="btn-add-main">+ إضافة مهمة</button>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">📈</span>تقدم اليوم</div>
+        <div class="xp-bar-wrap">
+          <div class="xp-bar-info"><span><span id="dq-done">0</span> / <span id="dq-total">0</span> مهمة</span><span id="dq-pct">0%</span></div>
+          <div class="xp-bar"><div class="xp-bar-fill" id="dq-fill" style="width:0%"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-side">
+      <div class="card">
+        <div class="card-title"><span class="ic">🎯</span>المهام الجانبية — الهدف: إكمال 2 من 3</div>
+        <div id="side-quests"></div>
+        <div class="flex gap-10 mt-10 flex-wrap">
+          <button class="btn btn-ghost" id="btn-add-side">+ إضافة مهمة خاصة</button>
+          <button class="btn btn-ghost" id="btn-refresh-side">🔄 تبديل المقترحات</button>
+        </div>
+        <div class="mt-20" id="side-bonus-msg"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-prayer">
+      <div class="card">
+        <div class="card-title"><span class="ic">🕌</span>الصلوات الخمس — <span id="prayer-count">0/5</span></div>
+        <div class="xp-bar-wrap mb-20"><div class="xp-bar"><div class="xp-bar-fill" id="prayer-fill" style="width:0%"></div></div></div>
+        <div class="prayer-grid" id="prayer-grid"></div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-title"><span class="ic">📅</span>إحصائيات آخر 7 أيام</div>
+          <div id="prayer-week"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ic">💡</span>تذكير</div>
+          <p style="color:var(--text-dim);font-size:.9rem;line-height:1.8">
+            سجّل كل فرض بعد أدائه. إذا فاتك فرض لا تيأس — سجّله وابدأ من جديد في الفرض التالي.
+            الضغط على نفس الزر مرة ثانية يلغي التسجيل (تصحيح الخطأ). النظام هنا لتشجيعك، وليس لإشعارك بالذنب. 💜
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-workout">
+      <div class="card">
+        <div class="card-title"><span class="ic">💪</span>جلسة اليوم — <span id="workout-status">—</span></div>
+        <div id="workout-day-info" style="color:var(--text-dim);font-size:.9rem;margin-bottom:15px"></div>
+        <div id="workout-list"></div>
+        <div class="flex gap-10 mt-20 flex-wrap">
+          <button class="btn btn-primary" id="btn-start-workout">▶ START WORKOUT</button>
+          <button class="btn btn-ghost" id="btn-complete-workout">✓ COMPLETE WORKOUT</button>
+          <button class="btn btn-ghost" id="btn-rest-day">🛌 REST DAY</button>
+        </div>
+        <div id="rest-timer" class="hidden mt-20 text-center">
+          <div style="font-family:'Orbitron',sans-serif;font-size:3rem;color:var(--neon-cyan)" id="timer-display">00:60</div>
+          <div style="color:var(--text-dim);margin:10px 0">وقت الراحة بين المجموعات</div>
+          <div class="flex gap-10" style="justify-content:center">
+            <button class="btn btn-ghost btn-sm" id="btn-rest-30">30 ث</button>
+            <button class="btn btn-ghost btn-sm" id="btn-rest-60">60 ث</button>
+            <button class="btn btn-ghost btn-sm" id="btn-rest-90">90 ث</button>
+            <button class="btn btn-danger btn-sm" id="btn-rest-stop">إيقاف</button>
+          </div>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-title"><span class="ic">📅</span>أيام التمرين الأسبوعية</div>
+          <div id="workout-days"></div>
+          <p style="color:var(--text-dim);font-size:.8rem;margin-top:10px">الأيام الأخرى راحة أو حركة خفيفة — لا عقاب على الراحة.</p>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ic">📊</span>السجل</div>
+          <div class="report-row"><span class="report-label">آخر تمرين</span><span class="report-val" id="last-workout">—</span></div>
+          <div class="report-row"><span class="report-label">جلسات هذا الأسبوع</span><span class="report-val" id="week-workouts">0</span></div>
+          <div class="report-row"><span class="report-label">إجمالي الجلسات</span><span class="report-val" id="total-workouts">0</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-schedule">
+      <div class="card">
+        <div class="card-title"><span class="ic">⏰</span>الجدول اليومي</div>
+        <div id="schedule-list"></div>
+        <div class="flex gap-10 mt-20 flex-wrap">
+          <button class="btn btn-ghost" id="btn-add-schedule">+ إضافة نشاط</button>
+          <button class="btn btn-primary" id="btn-quick-plan">⚡ QUICK PLAN</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">🎯</span>مؤقت بومودورو للمذاكرة</div>
+        <div class="text-center">
+          <div style="font-family:'Orbitron',sans-serif;font-size:4rem;color:var(--neon-cyan)" id="pomo-display">25:00</div>
+          <div class="flex gap-10 mt-20" style="justify-content:center">
+            <button class="btn btn-primary" id="pomo-btn">▶ ابدأ</button>
+            <button class="btn btn-ghost" id="pomo-reset">↺ إعادة</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-rewards">
+      <div class="card">
+        <div class="card-title"><span class="ic">🎁</span>المكافآت الخيالية</div>
+        <div class="grid grid-3" id="fantasy-rewards"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">🎮</span>المكافآت الواقعية (اختيارية)</div>
+        <div id="real-rewards"></div>
+        <button class="btn btn-ghost mt-10" id="btn-add-reward">+ إضافة مكافأة</button>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">📦</span>صندوق المكافآت</div>
+        <p style="color:var(--text-dim);margin-bottom:15px">افتح الصندوق بعد إكمال الهدف الأسبوعي (20 مهمة في الأسبوع) — التجربة ممتعة حتى لو المكافأة بسيطة!</p>
+        <button class="btn btn-primary" id="chest-btn">🔒 SHADOW CHEST</button>
+      </div>
+    </section>
+
+    <section class="page" id="page-achievements">
+      <div class="card">
+        <div class="card-title"><span class="ic">🏆</span>الرتب</div>
+        <div id="ranks-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">🎖️</span>الإنجازات</div>
+        <div class="ach-grid" id="ach-grid"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-progress">
+      <div class="card">
+        <div class="card-title"><span class="ic">📊</span>الرسم البياني — XP اليومي</div>
+        <div class="tabs" id="chart-tabs">
+          <button class="tab active" data-range="7">7 أيام</button>
+          <button class="tab" data-range="14">14 يوم</button>
+          <button class="tab" data-range="30">30 يوم</button>
+        </div>
+        <div class="chart-wrap" id="chart-wrap"><canvas id="xp-chart"></canvas></div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-title"><span class="ic">📈</span>إحصائيات</div>
+          <div class="report-row"><span class="report-label">إجمالي XP</span><span class="report-val" id="p-totalxp">0</span></div>
+          <div class="report-row"><span class="report-label">المستوى الحالي</span><span class="report-val" id="p-level">1</span></div>
+          <div class="report-row"><span class="report-label">إجمالي المهام</span><span class="report-val" id="p-quests">0</span></div>
+          <div class="report-row"><span class="report-label">جلسات التمرين</span><span class="report-val" id="p-workouts">0</span></div>
+          <div class="report-row"><span class="report-label">الصلوات المسجلة</span><span class="report-val" id="p-prayers">0</span></div>
+          <div class="report-row"><span class="report-label">الإنجازات</span><span class="report-val" id="p-ach">0</span></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ic">📝</span>سجل الملاحظات اليومية</div>
+          <div id="notes-log" style="max-height:300px;overflow-y:auto"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-report">
+      <div class="card">
+        <div class="card-title"><span class="ic">📋</span>DAILY QUEST REPORT</div>
+        <div id="daily-report"></div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-title"><span class="ic">💭</span>What did I learn today?</div>
+          <textarea class="input" id="learned-today" placeholder="اكتب هنا..."></textarea>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="ic">🎯</span>What can I improve tomorrow?</div>
+          <textarea class="input" id="improve-tomorrow" placeholder="اكتب هنا..."></textarea>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="btn-save-notes">💾 حفظ الملاحظات</button>
+      <div class="card mt-20">
+        <div class="card-title"><span class="ic">📅</span>ملخص الأسبوع</div>
+        <div id="weekly-report"></div>
+        <button class="btn btn-primary mt-10" id="btn-weekly-review">📊 WEEKLY REVIEW</button>
+      </div>
+    </section>
+
+    <section class="page" id="page-settings">
+      <div class="card">
+        <div class="card-title"><span class="ic">⚙️</span>الإعدادات العامة</div>
+        <div class="setting-row">
+          <div><div class="setting-label">تشغيل المقدمة عند الفتح</div><div class="setting-desc">تُعطَّل تلقائيًا بعد أول عرض — فعّلها من هنا لأي وقت</div></div>
+          <div class="switch" id="sw-intro"></div>
+        </div>
+        <div class="setting-row">
+          <div><div class="setting-label">المؤثرات الصوتية</div><div class="setting-desc">أصوات خفيفة عند الإنجازات</div></div>
+          <div class="switch" id="sw-sound"></div>
+        </div>
+        <div class="setting-row">
+          <div><div class="setting-label">تقليل الأنيميشن</div><div class="setting-desc">لأجهزة أضعف أو راحة أكثر</div></div>
+          <div class="switch" id="sw-reduce"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">🎯</span>قيم XP (قابلة للتعديل)</div>
+        <div class="setting-row"><div class="setting-label">مهمة يومية أساسية</div><input type="number" class="input" style="width:100px" id="xp-main" data-xp="mainQuest"></div>
+        <div class="setting-row"><div class="setting-label">تمرين اليوم</div><input type="number" class="input" style="width:100px" id="xp-workout" data-xp="workout"></div>
+        <div class="setting-row"><div class="setting-label">كل فرض صلاة</div><input type="number" class="input" style="width:100px" id="xp-prayer" data-xp="prayer"></div>
+        <div class="setting-row"><div class="setting-label">مهمة جانبية</div><input type="number" class="input" style="width:100px" id="xp-side" data-xp="sideQuest"></div>
+        <div class="setting-row"><div class="setting-label">مكافأة إكمال 2 جانبية</div><input type="number" class="input" style="width:100px" id="xp-sidebonus" data-xp="sideBonus"></div>
+        <div class="setting-row"><div class="setting-label">مكافأة إكمال كل الأساسية</div><input type="number" class="input" style="width:100px" id="xp-alldaily" data-xp="allDaily"></div>
+        <div class="setting-row"><div class="setting-label">هدف أسبوعي</div><input type="number" class="input" style="width:100px" id="xp-weekly" data-xp="weekly"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">💾</span>البيانات</div>
+        <div class="flex gap-10 flex-wrap">
+          <button class="btn btn-primary" id="btn-export">📤 Export Data</button>
+          <button class="btn btn-ghost" id="btn-import">📥 Import Data</button>
+          <input type="file" id="import-file" accept=".json,application/json" style="display:none">
+          <button class="btn btn-danger" id="btn-reset">🗑️ Reset Data</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+'use strict';
+/* ================= SYSTEM v2 — FIXED ================= */
+var STORAGE_KEY = 'system_app_v2';
+var WEEK_GOAL = 20;
+
+function $(id){ return document.getElementById(id); }
+function todayStr(d){
+  d = d || new Date();
+  var y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + dd;
+}
+function dateOffset(days){ var d = new Date(); d.setDate(d.getDate()+days); return d; }
+function weekStartStr(){
+  var d = new Date(); var day = (d.getDay()+6)%7; d.setDate(d.getDate()-day); return todayStr(d);
+}
+function uid(p){ return p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+var PRAYERS = [
+  {key:'fajr',name:'الفجر',en:'FAJR',ic:'🌅'},
+  {key:'dhuhr',name:'الظهر',en:'DHUHR',ic:'☀️'},
+  {key:'asr',name:'العصر',en:'ASR',ic:'🌤️'},
+  {key:'maghrib',name:'المغرب',en:'MAGHRIB',ic:'🌇'},
+  {key:'isha',name:'العشاء',en:'ISHA',ic:'🌙'}
+];
+var SIDE_POOL = [
+  {t:'تعلم 5 كلمات إنجليزية جديدة',cat:'learn'},
+  {t:'اكتب 5 أسطر عن فكرة أو قصة',cat:'write'},
+  {t:'حل سؤالين من مادة دراسية',cat:'study'},
+  {t:'تعلم مفهوم بسيط في Python',cat:'code'},
+  {t:'تعلم مفهوم بسيط في HTML',cat:'code'},
+  {t:'اقرأ صفحتين من كتاب',cat:'read'},
+  {t:'رتب المكتب لمدة 5 دقائق',cat:'organize'},
+  {t:'راجع ما تعلمته اليوم',cat:'review'},
+  {t:'اكتب خطة الغد',cat:'plan'},
+  {t:'تدرب على التحدث بالإنجليزية 5 دقائق',cat:'lang'},
+  {t:'تعلم معلومة جديدة واكتبها',cat:'learn'},
+  {t:'أنجز جزءًا صغيرًا من مشروع شخصي',cat:'project'},
+  {t:'اكتب 3 أشياء تشعر بالامتنان لها',cat:'mind'},
+  {t:'اشرب 6 أكواب ماء خلال اليوم',cat:'health'},
+  {t:'تمرن على التنفس العميق 3 دقائق',cat:'mind'},
+  {t:'رتب حقيبة المدرسة للغد',cat:'organize'},
+  {t:'اقرأ صفحة واحدة وتدبر معناها',cat:'spiritual'},
+  {t:'اذكر 3 دروس تعلمتها هذا الأسبوع',cat:'review'},
+  {t:'تعلم كلمة عربية فصيحة جديدة',cat:'lang'}
+];
+var MAIN_DEFAULTS = [
+  {t:'أداء الصلوات الخمس وتسجيلها',xpKey:'mainQuest',attr:'discipline'},
+  {t:'جلسة تمرين منزلي (في أيام التمرين)',xpKey:'workout',attr:'strength'},
+  {t:'جلسة مذاكرة أو واجب مدرسي',xpKey:'mainQuest',attr:'knowledge'},
+  {t:'تنظيم اليوم التالي والاستعداد للنوم',xpKey:'mainQuest',attr:'consistency'}
+];
+var DEFAULT_SCHEDULE = [
+  {time:'06:00 - 16:00',name:'المدرسة (بدون هاتف)',ic:'🏫'},
+  {time:'16:00 - 16:45',name:'العودة + الطعام + راحة',ic:'🍽️'},
+  {time:'16:45 - 17:15',name:'وقت مرن / التزامات',ic:'☕'},
+  {time:'17:15 - 18:00',name:'مذاكرة / واجبات',ic:'📚'},
+  {time:'18:00 - 18:15',name:'استراحة',ic:'⏸️'},
+  {time:'18:15 - 18:30',name:'تمرين منزلي (أيام التمرين)',ic:'💪'},
+  {time:'18:30 - 20:00',name:'صلوات + مهام جانبية',ic:'🎯'},
+  {time:'20:00 - 22:00',name:'ترفيه / ألعاب',ic:'🎮'},
+  {time:'22:00 - 22:30',name:'مراجعة اليوم + نوم',ic:'🌙'}
+];
+var WORKOUT_ROUTINE = [
+  {name:'إحماء خفيف',detail:'3 دقائق — تحريك المفاصل والمشي في المكان',ic:'🔥'},
+  {name:'Squats / جلوس وقيام من كرسي',detail:'8-10 تكرارات — مجموعة واحدة (الثانية اختيارية)',ic:'🏋️'},
+  {name:'Wall Push-ups',detail:'5-8 تكرارات — أو Push-ups عادية حسب القدرة',ic:'💪'},
+  {name:'Plank',detail:'10-15 ثانية — فقط إذا كان مريحًا',ic:'⏱️'},
+  {name:'تهدئة',detail:'دقيقة — تمدد خفيف وتنفس عميق',ic:'🧘'}
+];
+var ACHIEVEMENTS = [
+  {id:'first_quest',name:'FIRST QUEST',desc:'أكمل أول مهمة',ic:'🎯',check:function(){return DATA.totalQuests>=1}},
+  {id:'first_workout',name:'FIRST WORKOUT',desc:'أكمل أول تمرين',ic:'💪',check:function(){return DATA.totalWorkouts>=1}},
+  {id:'knowledge_10',name:'KNOWLEDGE SEEKER',desc:'أكمل 10 مهام',ic:'📚',check:function(){return DATA.totalQuests>=10}},
+  {id:'streak_3',name:'CONSISTENCY',desc:'3 أيام التزام متتالية',ic:'🔥',check:function(){return DATA.player.streak>=3}},
+  {id:'streak_7',name:'WEEK WARRIOR',desc:'7 أيام التزام متتالية',ic:'⚔️',check:function(){return DATA.player.streak>=7}},
+  {id:'side_master',name:'SIDE QUEST MASTER',desc:'أكمل 20 مهمة',ic:'🎯',check:function(){return DATA.totalQuests>=20}},
+  {id:'level_5',name:'RISING HUNTER',desc:'الوصول للمستوى 5',ic:'⭐',check:function(){return DATA.player.level>=5}},
+  {id:'level_10',name:'ELITE HUNTER',desc:'الوصول للمستوى 10',ic:'🌟',check:function(){return DATA.player.level>=10}},
+  {id:'prayer_10',name:'FAITHFUL',desc:'سجّل 10 صلوات',ic:'🕌',check:function(){return DATA.totalPrayers>=10}},
+  {id:'prayer_50',name:'DEVOTED',desc:'سجّل 50 صلاة',ic:'✨',check:function(){return DATA.totalPrayers>=50}},
+  {id:'xp_500',name:'EXPERIENCED',desc:'اجمع 500 XP',ic:'💎',check:function(){return DATA.player.totalXp>=500}},
+  {id:'xp_2000',name:'VETERAN',desc:'اجمع 2000 XP',ic:'👑',check:function(){return DATA.player.totalXp>=2000}}
+];
+var PAGE_TITLES = {dashboard:'DASHBOARD',quests:'DAILY QUESTS',side:'SIDE QUESTS',prayer:'PRAYER TRACKER',workout:'HOME WORKOUT',schedule:'DAILY SCHEDULE',rewards:'REWARDS & LOOT',achievements:'ACHIEVEMENTS',progress:'PROGRESS',report:'DAILY REPORT',settings:'SETTINGS'};
+
+/* ---------- DEFAULT + NORMALIZE (FIX #1) ---------- */
+function freshToday(){
+  return {
+    date: todayStr(),
+    mainQuests: [], sideQuests: [],
+    prayers: {fajr:null,dhuhr:null,asr:null,maghrib:null,isha:null},
+    prayerXP: {},
+    workoutDone:false, workoutRest:false,
+    sideBonusClaimed:false, allDailyClaimed:false,
+    xpGained:0, notes:null
+  };
+}
+function defaultData(){
+  return {
+    player:{name:'AMR',level:1,xp:0,totalXp:0,streak:0},
+    attributes:{discipline:10,knowledge:10,strength:10,consistency:10},
+    settings:{showIntro:true,sound:true,reduceMotion:false,
+      xpValues:{mainQuest:20,workout:25,prayer:10,sideQuest:10,sideBonus:20,allDaily:15,weekly:50}},
+    today: freshToday(),
+    history:{}, achievements:{},
+    customMainQuests:[], customSideQuests:[], customSchedule:[], realRewards:[],
+    workoutDays:[1,4],
+    totalWorkouts:0, totalQuests:0, totalPrayers:0,
+    weekKey: weekStartStr(), weeklyClaimed:false, chestUnlocked:false, chestOpened:false
+  };
+}
+function deepMerge(target, src){
+  if(!src || typeof src !== 'object') return target;
+  Object.keys(src).forEach(function(k){
+    var v = src[k];
+    if(v && typeof v === 'object' && !Array.isArray(v) && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])){
+      deepMerge(target[k], v);
+    } else if(v !== undefined){
+      target[k] = v;
+    }
+  });
+  return target;
+}
+function normalize(d){
+  var def = defaultData();
+  deepMerge(d, {}); // no-op safety
+  d.player = deepMerge(def.player, d.player||{});
+  d.attributes = deepMerge(def.attributes, d.attributes||{});
+  d.settings = deepMerge(def.settings, d.settings||{});
+  d.settings.xpValues = deepMerge(def.settings.xpValues, (d.settings&&d.settings.xpValues)||{});
+  d.history = d.history||{}; d.achievements = d.achievements||{};
+  d.customMainQuests = Array.isArray(d.customMainQuests)?d.customMainQuests:[];
+  d.customSideQuests = Array.isArray(d.customSideQuests)?d.customSideQuests:[];
+  d.customSchedule = Array.isArray(d.customSchedule)?d.customSchedule:[];
+  d.realRewards = Array.isArray(d.realRewards)?d.realRewards:[];
+  d.workoutDays = Array.isArray(d.workoutDays)?d.workoutDays:[1,4];
+  ['totalWorkouts','totalQuests','totalPrayers'].forEach(function(k){ if(typeof d[k]!=='number') d[k]=0; });
+  d.weekKey = d.weekKey||weekStartStr();
+  // today MUST be complete (FIX #1 root cause)
+  d.today = deepMerge(freshToday(), d.today||{});
+  if(!d.today.prayerXP || typeof d.today.prayerXP!=='object') d.today.prayerXP={};
+  if(!Array.isArray(d.today.mainQuests)) d.today.mainQuests=[];
+  if(!Array.isArray(d.today.sideQuests)) d.today.sideQuests=[];
+  PRAYERS.forEach(function(p){ if(!(p.key in d.today.prayers)) d.today.prayers[p.key]=null; });
+  if(typeof d.today.xpGained!=='number') d.today.xpGained=0;
+  return d;
+}
+function loadData(){
+  try{
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return normalize(defaultData());
+    return normalize(deepMerge(defaultData(), JSON.parse(raw)));
+  }catch(e){ return normalize(defaultData()); }
+}
+var DATA = loadData();
+function save(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); }catch(e){} }
+
+/* ---------- DAY / WEEK HELPERS ---------- */
+function buildMainQuests(){
+  var list = MAIN_DEFAULTS.concat(DATA.customMainQuests).map(function(q){
+    return {id:uid('mq'), t:q.t, xpKey:q.xpKey||'mainQuest', attr:q.attr||'discipline', done:false, custom:!!q.custom};
+  });
+  return list;
+}
+function buildSideQuests(){
+  var picks = SIDE_POOL.slice().sort(function(){return Math.random()-.5}).slice(0,3)
+    .map(function(q){ return {id:uid('sq'), t:q.t, cat:q.cat, done:false}; });
+  var custom = DATA.customSideQuests.map(function(q){ return {id:uid('sq'), t:q.t, cat:'custom', done:false, custom:true}; });
+  return picks.concat(custom);
+}
+function checkRollover(){
+  var now = todayStr();
+  if(DATA.today.date === now) return;
+  var oldDate = DATA.today.date;
+  if(oldDate){
+    DATA.history[oldDate] = DATA.today;
+    if(typeof DATA.history[oldDate].xpGained !== 'number') DATA.history[oldDate].xpGained = 0;
+  }
+  DATA.today = freshToday();
+  DATA.today.mainQuests = buildMainQuests();
+  DATA.today.sideQuests = buildSideQuests();
+  checkWeekReset();
+  computeStreak();
+  save();
+}
+function checkWeekReset(){
+  var ws = weekStartStr();
+  if(DATA.weekKey !== ws){
+    DATA.weekKey = ws; DATA.weeklyClaimed=false; DATA.chestUnlocked=false; DATA.chestOpened=false;
+  }
+}
+function dayData(dstr){ return dstr === todayStr() ? DATA.today : (DATA.history[dstr]||null); }
+function isCommitted(h){
+  if(!h) return false;
+  var m = (h.mainQuests||[]).filter(function(q){return q.done}).length;
+  var s = (h.sideQuests||[]).filter(function(q){return q.done}).length;
+  return (m+s) >= 2;
+}
+function computeStreak(){
+  var st = 0, cursor = new Date();
+  if(isCommitted(dayData(todayStr(cursor)))){ st++; cursor.setDate(cursor.getDate()-1); }
+  else { cursor.setDate(cursor.getDate()-1); }
+  while(isCommitted(dayData(todayStr(cursor)))){ st++; cursor.setDate(cursor.getDate()-1); }
+  DATA.player.streak = st;
+}
+function weekKeys(n){
+  var out = [];
+  for(var i=n-1;i>=0;i--) out.push(todayStr(dateOffset(-i)));
+  return out;
+}
+function weekTotals(){
+  var t = 0;
+  weekKeys(7).forEach(function(k){
+    var h = dayData(k); if(!h) return;
+    t += (h.mainQuests||[]).filter(function(q){return q.done}).length;
+    t += (h.sideQuests||[]).filter(function(q){return q.done}).length;
+  });
+  return t;
+}
+function weekCommittedCount(){
+  return weekKeys(7).filter(function(k){ return isCommitted(dayData(k)); }).length;
+}
+
+/* ---------- XP / LEVELS ---------- */
+function xpForLevel(l){ return Math.floor(100*Math.pow(1.25,l-1)); }
+function rankForLevel(l){
+  if(l>=50) return {name:'S-RANK',color:'#fbbf24'};
+  if(l>=30) return {name:'A-RANK',color:'#a855f7'};
+  if(l>=20) return {name:'B-RANK',color:'#3b82f6'};
+  if(l>=10) return {name:'C-RANK',color:'#22d3ee'};
+  if(l>=5)  return {name:'D-RANK',color:'#10b981'};
+  return {name:'E-RANK',color:'#8b92b8'};
+}
+function addXP(amount, source, attrKey){
+  amount = Math.max(0, parseInt(amount,10)||0);
+  if(amount<=0){ save(); updateUI(); return; }
+  DATA.player.xp += amount;
+  DATA.player.totalXp += amount;
+  DATA.today.xpGained = (DATA.today.xpGained||0) + amount;
+  if(attrKey && typeof DATA.attributes[attrKey]==='number'){
+    DATA.attributes[attrKey] = Math.min(100, DATA.attributes[attrKey] + Math.ceil(amount/5));
+  }
+  var leveled = false, needed = xpForLevel(DATA.player.level);
+  while(DATA.player.xp >= needed){
+    DATA.player.xp -= needed; DATA.player.level++; leveled = true;
+    needed = xpForLevel(DATA.player.level);
+  }
+  save(); updateUI();
+  if(leveled) showLevelUp(DATA.player.level);
+  if(source) notify('XP +'+amount, source, 'success');
+}
+
+/* ---------- SOUND (FIX #14) ---------- */
+var audioCtx = null;
+function beep(freq, dur){
+  if(!DATA.settings.sound) return;
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type='sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(.06, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, audioCtx.currentTime+(dur||.15));
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime+(dur||.15));
+  }catch(e){}
+}
+
+/* ---------- NOTIFICATIONS ---------- */
+function notify(title, body, type){
+  var el = document.createElement('div');
+  el.className = 'notif ' + (type||'');
+  el.innerHTML = '<div class="notif-title"></div>' + (body?'<div class="notif-body"></div>':'');
+  el.querySelector('.notif-title').textContent = title;
+  if(body) el.querySelector('.notif-body').textContent = body;
+  $('notifications').appendChild(el);
+  setTimeout(function(){ el.remove(); }, 4200);
+  if(type==='success') beep(880,.12);
+  if(type==='gold'){ beep(1046,.15); setTimeout(function(){beep(1318,.2)},120); }
+}
+
+/* ---------- LEVEL UP ---------- */
+function showLevelUp(lvl){
+  $('levelup-num').textContent = lvl;
+  $('levelup').classList.add('show');
+  var pc = $('particles'); pc.innerHTML='';
+  var colors = ['#fbbf24','#a855f7','#22d3ee'];
+  for(var i=0;i<36;i++){
+    var p = document.createElement('div'); p.className='particle';
+    var a = Math.random()*Math.PI*2, dist = 180+Math.random()*300;
+    p.style.setProperty('--tx', Math.cos(a)*dist+'px');
+    p.style.setProperty('--ty', Math.sin(a)*dist+'px');
+    p.style.left='50%'; p.style.top='50%';
+    p.style.background = colors[i%3];
+    pc.appendChild(p);
+  }
+  beep(660,.2); setTimeout(function(){beep(880,.2)},150); setTimeout(function(){beep(1100,.3)},300);
+}
+
+/* ---------- QUESTS ---------- */
+function toggleMainQuest(id){
+  var q = DATA.today.mainQuests.filter(function(x){return x.id===id})[0];
+  if(!q || q.done) return;
+  q.done = true;
+  DATA.totalQuests++;
+  addXP(DATA.settings.xpValues[q.xpKey]||20, '✓ QUEST: '+q.t, q.attr);
+  if(!DATA.today.allDailyClaimed && DATA.today.mainQuests.length>0 &&
+     DATA.today.mainQuests.every(function(x){return x.done})){
+    DATA.today.allDailyClaimed = true;
+    addXP(DATA.settings.xpValues.allDaily, '🎁 ALL DAILY QUESTS COMPLETE', 'consistency');
+  }
+  computeStreak(); checkWeeklyGoal(); checkAchievements();
+  save(); updateUI();
+}
+function toggleSideQuest(id){
+  var q = DATA.today.sideQuests.filter(function(x){return x.id===id})[0];
+  if(!q || q.done) return;
+  q.done = true;
+  DATA.totalQuests++;
+  var attr = (q.cat==='learn'||q.cat==='study'||q.cat==='code'||q.cat==='read') ? 'knowledge'
+           : (q.cat==='health'||q.cat==='mind') ? 'discipline' : 'consistency';
+  addXP(DATA.settings.xpValues.sideQuest, '🎯 SIDE QUEST: '+q.t, attr);
+  var doneCount = DATA.today.sideQuests.filter(function(x){return x.done}).length;
+  if(doneCount>=2 && !DATA.today.sideBonusClaimed){
+    DATA.today.sideBonusClaimed = true;
+    addXP(DATA.settings.xpValues.sideBonus, '⚡ SIDE QUEST BONUS UNLOCKED', 'consistency');
+  }
+  computeStreak(); checkWeeklyGoal(); checkAchievements();
+  save(); updateUI();
+}
+function deleteQuest(type, id){
+  var list = type==='main' ? DATA.today.mainQuests : DATA.today.sideQuests;
+  var q = list.filter(function(x){return x.id===id})[0];
+  if(!q) return;
+  if(type==='main'){
+    DATA.today.mainQuests = DATA.today.mainQuests.filter(function(x){return x.id!==id});
+    if(q.custom) DATA.customMainQuests = DATA.customMainQuests.filter(function(c){return c.t!==q.t});
+  }else{
+    DATA.today.sideQuests = DATA.today.sideQuests.filter(function(x){return x.id!==id});
+    if(q.custom) DATA.customSideQuests = DATA.customSideQuests.filter(function(c){return c.t!==q.t});
+  }
+  save(); updateUI();
+  notify('🗑️ تم الحذف', q.t, '');
+}
+function refreshSideQuests(){
+  var keep = DATA.today.sideQuests.filter(function(q){ return q.done || q.custom; });
+  var usedTitles = {}; DATA.today.sideQuests.forEach(function(q){ usedTitles[q.t]=1; });
+  var avail = SIDE_POOL.filter(function(p){ return !usedTitles[p.t]; })
+                       .sort(function(){return Math.random()-.5});
+  var need = Math.max(3 - keep.length, 0);
+  var picks = avail.slice(0, need).map(function(p){ return {id:uid('sq'), t:p.t, cat:p.cat, done:false}; });
+  DATA.today.sideQuests = picks.concat(keep);
+  save(); updateUI();
+  notify('🔄 تم التبديل', 'مهام جانبية جديدة متاحة', 'success');
+}
+
+/* ---------- PRAYER (FIX #4 #5) ---------- */
+function setPrayer(key, val){
+  var P = DATA.today.prayers;
+  if(!(key in P)) return;
+  var prev = P[key];
+  if(prev === val){ P[key] = null; }          // تصحيح بالضغط مرة ثانية
+  else{
+    P[key] = val;                              // FIX: الحالة أولًا ثم النقاط
+    if(val === 'prayed' && !DATA.today.prayerXP[key]){
+      DATA.today.prayerXP[key] = true;         // FIX: لا نقاط مكررة أبدًا
+      DATA.totalPrayers++;
+      addXP(DATA.settings.xpValues.prayer, '🕌 صلاة: '+key, 'discipline');
+    }
+    if(prev === 'prayed' && val !== 'prayed'){
+      DATA.totalPrayers = Math.max(0, DATA.totalPrayers-1);
+    }
+  }
+  checkAchievements();
+  save(); updateUI();
+}
+
+/* ---------- WORKOUT ---------- */
+function completeWorkout(){
+  if(DATA.today.workoutDone){ notify('⚠️ مسجل بالفعل', 'تمرين اليوم مكتمل', 'gold'); return; }
+  DATA.today.workoutDone = true;
+  DATA.today.workoutRest = false;
+  DATA.totalWorkouts++;
+  addXP(DATA.settings.xpValues.workout, '💪 WORKOUT COMPLETE', 'strength');
+  checkAchievements(); save(); updateUI();
+}
+function markRestDay(){
+  DATA.today.workoutRest = !DATA.today.workoutRest;   // FIX #13 toggle
+  save(); updateUI();
+  notify(DATA.today.workoutRest?'🛌 REST DAY':'▶ تم إلغاء الراحة',
+         DATA.today.workoutRest?'الراحة جزء أساسي من النظام — استمتع بيومك':'بالتوفيق!', 'success');
+}
+function toggleWorkoutDay(i){
+  var idx = DATA.workoutDays.indexOf(i);
+  if(idx>=0) DATA.workoutDays.splice(idx,1); else DATA.workoutDays.push(i);
+  save(); updateUI();
+}
+var restInterval = null;
+function startRestTimer(sec){
+  clearInterval(restInterval);
+  $('rest-timer').classList.remove('hidden');
+  var left = sec;
+  var draw = function(){
+    $('timer-display').textContent = String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+  };
+  draw();
+  restInterval = setInterval(function(){
+    left--;
+    if(left<=0){ clearInterval(restInterval); notify('⏱️ انتهت الراحة', 'يلا المجموعة الجاية 💪','success'); left=0; }
+    draw();
+  },1000);
+}
+function stopRestTimer(){ clearInterval(restInterval); $('rest-timer').classList.add('hidden'); }
+
+/* ---------- SCHEDULE (FIX #7) ---------- */
+function parseRange(t){
+  var m = String(t).match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+  if(m) return [ (+m[1])*60+(+m[2]), (+m[3])*60+(+m[4]) ];
+  var s = String(t).match(/(\d{1,2}):(\d{2})/);
+  if(s) return [ (+s[1])*60+(+s[2]), null ];
+  return [null,null];
+}
+function deleteSchedule(i){
+  DATA.customSchedule.splice(i,1);
+  save(); updateUI();
+}
+function quickPlan(){
+  DATA.customSchedule = [
+    {time:'16:00 - 16:30',name:'راحة سريعة',ic:'☕',custom:true},
+    {time:'16:30 - 17:30',name:'المهمة الأهم اليوم',ic:'🎯',custom:true},
+    {time:'17:30 - 18:00',name:'صلوات + مهمة جانبية',ic:'🕌',custom:true},
+    {time:'18:00 - 20:00',name:'وقت حر',ic:'🎮',custom:true},
+    {time:'20:00 - 20:30',name:'مراجعة سريعة + نوم',ic:'🌙',custom:true}
+  ];
+  save(); updateUI();
+  notify('⚡ QUICK PLAN', 'تم إنشاء خطة مختصرة ليوم مزدحم', 'success');
+}
+
+/* ---------- POMODORO ---------- */
+var pomoInterval=null, pomoSeconds=25*60, pomoRunning=false;
+function updatePomoDisplay(){
+  $('pomo-display').textContent = String(Math.floor(pomoSeconds/60)).padStart(2,'0')+':'+String(pomoSeconds%60).padStart(2,'0');
+}
+function togglePomo(){
+  if(pomoRunning){ clearInterval(pomoInterval); pomoRunning=false; $('pomo-btn').textContent='▶ ابدأ'; return; }
+  pomoRunning = true; $('pomo-btn').textContent='⏸ إيقاف';
+  pomoInterval = setInterval(function(){
+    pomoSeconds--;
+    if(pomoSeconds<=0){
+      clearInterval(pomoInterval); pomoRunning=false; $('pomo-btn').textContent='▶ ابدأ';
+      notify('⏰ انتهى وقت الجلسة','خذ استراحة قصيرة','success');
+      pomoSeconds = 25*60;
+    }
+    updatePomoDisplay();
+  },1000);
+}
+function resetPomo(){ clearInterval(pomoInterval); pomoRunning=false; pomoSeconds=25*60; updatePomoDisplay(); $('pomo-btn').textContent='▶ ابدأ'; }
+
+/* ---------- WEEKLY GOAL + CHEST (FIX #12) ---------- */
+function checkWeeklyGoal(){
+  checkWeekReset();
+  if(!DATA.weeklyClaimed && weekTotals() >= WEEK_GOAL){
+    DATA.weeklyClaimed = true;
+    DATA.chestUnlocked = true;
+    addXP(DATA.settings.xpValues.weekly, '🎯 WEEKLY GOAL COMPLETE', 'consistency');
+    notify('📦 SHADOW CHEST UNLOCKED', 'الصندوق جاهز في صفحة المكافآت', 'gold');
+  }
+}
+function openShadowChest(){
+  if(!DATA.chestUnlocked || DATA.chestOpened){
+    notify('🔒 الصندوق مقفل', 'أكمل الهدف الأسبوعي: '+weekTotals()+'/'+WEEK_GOAL+' مهمة', '');
+    return;
+  }
+  DATA.chestOpened = true;
+  var rewards = ['لقب: Shadow Hunter 🗡️','إطار نادر لملف اللاعب 🖼️','XP Bonus +50 💎','لقب: Rising Star ⭐','شارة نادرة: Night Warrior 🌙','XP Bonus +100 💎💎','رسالة من النظام: أنت أقوى مما تظن 💜'];
+  var r = rewards[Math.floor(Math.random()*rewards.length)];
+  save(); updateUI();
+  openModal(
+    '<div class="modal-title" style="text-align:center;color:var(--neon-gold)">📦 SHADOW CHEST</div>'+
+    '<div style="text-align:center;font-size:5rem;margin:20px 0;animation:pulse 1.5s infinite">🎁</div>'+
+    '<div style="text-align:center;font-family:Orbitron,sans-serif;color:var(--neon-cyan);margin-bottom:20px">YOU GOT:</div>'+
+    '<div style="text-align:center;font-size:1.1rem;color:var(--neon-gold);padding:15px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:10px"></div>'+
+    '<button class="btn btn-primary mt-20" style="width:100%" id="modal-chest-ok">Awesome!</button>'
+  );
+  $('modal-content').querySelector('div[style*="neon-gold;padding"]') || null;
+  var boxes = $('modal-content').querySelectorAll('div');
+  boxes[boxes.length-2].textContent = r;
+  $('modal-chest-ok').addEventListener('click', closeModal);
+  if(r.indexOf('+50')>=0) addXP(50,'📦 Shadow Chest');
+  if(r.indexOf('+100')>=0) addXP(100,'📦 Shadow Chest');
+  beep(523,.15); setTimeout(function(){beep(784,.2)},150); setTimeout(function(){beep(1046,.3)},300);
+}
+
+/* ---------- ACHIEVEMENTS ---------- */
+function checkAchievements(){
+  ACHIEVEMENTS.forEach(function(a){
+    if(!DATA.achievements[a.id] && a.check()){
+      DATA.achievements[a.id] = {unlockedAt: Date.now()};
+      notify('🏆 ACHIEVEMENT UNLOCKED', a.name+' — '+a.desc, 'gold');
+    }
+  });
+  save();
+}
+
+/* ---------- MODAL ---------- */
+function openModal(html){ $('modal-content').innerHTML = html; $('modal').classList.add('show'); }
+function closeModal(){ $('modal').classList.remove('show'); }
+
+function openAddQuest(type){
+  openModal(
+    '<div class="modal-title">إضافة مهمة '+(type==='main'?'أساسية':'جانبية')+'</div>'+
+    '<input class="input mb-10" id="q-text" placeholder="نص المهمة (عربي أو English)">'+
+    '<button class="btn btn-primary" id="q-save">حفظ</button>'
+  );
+  $('q-save').addEventListener('click', function(){
+    var t = $('q-text').value.trim();
+    if(!t){ notify('⚠️','اكتب نص المهمة أولًا',''); return; }
+    if(type==='main'){
+      DATA.customMainQuests.push({t:t, xpKey:'mainQuest', attr:'discipline', custom:true});
+      DATA.today.mainQuests.push({id:uid('mq'), t:t, xpKey:'mainQuest', attr:'discipline', done:false, custom:true});
+    }else{
+      DATA.customSideQuests.push({t:t, cat:'custom', custom:true});
+      DATA.today.sideQuests.push({id:uid('sq'), t:t, cat:'custom', done:false, custom:true});
+    }
+    save(); updateUI(); closeModal();
+    notify('➕ تمت الإضافة', t, 'success');
+  });
+}
+function openAddSchedule(){
+  openModal(
+    '<div class="modal-title">إضافة نشاط للجدول</div>'+
+    '<input class="input mb-10" id="sc-time" placeholder="الوقت: 20:00 - 21:00">'+
+    '<input class="input mb-10" id="sc-name" placeholder="اسم النشاط">'+
+    '<input class="input mb-10" id="sc-ic" placeholder="أيقونة (إيموجي)" value="📌">'+
+    '<button class="btn btn-primary" id="sc-save">حفظ</button>'
+  );
+  $('sc-save').addEventListener('click', function(){
+    var time = $('sc-time').value.trim(), name = $('sc-name').value.trim();
+    var ic = $('sc-ic').value.trim()||'📌';
+    if(!time || !name){ notify('⚠️','أكمل الوقت والاسم',''); return; }
+    DATA.customSchedule.push({time:time, name:name, ic:ic, custom:true});
+    DATA.customSchedule.sort(function(a,b){ return (parseRange(a.time)[0]||0)-(parseRange(b.time)[0]||0); });
+    save(); updateUI(); closeModal();
+    notify('➕ تمت الإضافة', name, 'success');
+  });
+}
+function openAddReward(){
+  openModal(
+    '<div class="modal-title">إضافة مكافأة واقعية</div>'+
+    '<input class="input mb-10" id="rw-name" placeholder="مثال: مشاهدة حلقة أنمي">'+
+    '<button class="btn btn-primary" id="rw-save">حفظ</button>'
+  );
+  $('rw-save').addEventListener('click', function(){
+    var name = $('rw-name').value.trim();
+    if(!name){ notify('⚠️','اكتب اسم المكافأة',''); return; }
+    DATA.realRewards.push({name:name});
+    save(); updateUI(); closeModal();
+    notify('🎁 تمت الإضافة', name, 'success');
+  });
+}
+function redeemReward(i){
+  var r = DATA.realRewards[i]; if(!r) return;
+  notify('🎁 REWARD REDEEMED', r.name+' — استمتع بدون ذنب!', 'gold');
+}
+function deleteReward(i){ DATA.realRewards.splice(i,1); save(); updateUI(); }
+
+function saveDailyNotes(){
+  DATA.today.notes = {
+    learned: $('learned-today').value,
+    improve: $('improve-tomorrow').value
+  };
+  notesLoadedFor = DATA.today.date;
+  save();
+  notify('💾 تم الحفظ','ملاحظات اليوم محفوظة في السجل','success');
+  updateUI();
+}
+function openWeeklyReview(){
+  var totals = weekTotals(), committed = weekCommittedCount();
+  var advice;
+  if(committed>=5) advice='🏆 أسبوع ممتاز! استمر بالخطة مع إمكانية رفع تحدي واحد تدريجيًا.';
+  else if(committed>=3) advice='👍 تقدم جيد — احتفظ بالخطة الحالية وحافظ على الاستمرارية.';
+  else if(committed>=1) advice='💪 أسبوع متوسط — احتفظ بالخطة كما هي، لا تضغط على نفسك.';
+  else advice='💜 أسبوع صعب — خذ راحتك، قلل المهام أو مدة الجلسات، وابدأ من جديد بدون ضغط.';
+  openModal(
+    '<div class="modal-title">📊 WEEKLY REVIEW</div>'+
+    '<div class="report-row"><span class="report-label">مهام الأسبوع</span><span class="report-val">'+totals+'</span></div>'+
+    '<div class="report-row"><span class="report-label">أيام الالتزام</span><span class="report-val">'+committed+'/7</span></div>'+
+    '<div class="report-row"><span class="report-label">الهدف الأسبوعي</span><span class="report-val">'+totals+'/'+WEEK_GOAL+'</span></div>'+
+    '<div id="weekly-advice" style="padding:15px;background:rgba(168,85,247,.08);border:1px solid var(--border);border-radius:10px;margin:15px 0"></div>'+
+    '<p style="font-size:.85rem;color:var(--text-dim)">💜 الراحة جزء أساسي من النظام — لست بحاجة لأن تكون مثاليًا لتستحقها.</p>'+
+    '<button class="btn btn-primary mt-20" style="width:100%" id="wr-ok">شكرًا</button>'
+  );
+  $('weekly-advice').textContent = advice;
+  $('wr-ok').addEventListener('click', closeModal);
+}
+
+/* ---------- DATA OPS ---------- */
+function exportData(){
+  var blob = new Blob([JSON.stringify(DATA,null,2)],{type:'application/json'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'system-backup-'+todayStr()+'.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  notify('📤 Export','تم تصدير نسخة احتياطية','success');
+}
+function importData(ev){
+  var file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var parsed = JSON.parse(e.target.result);
+      DATA = normalize(deepMerge(defaultData(), parsed));
+      checkRollover(); save(); updateUI();
+      notify('📥 Import','تم استعادة البيانات بنجاح','success');
+    }catch(err){ notify('❌ خطأ','الملف غير صالح',''); }
+  };
+  reader.readAsText(file);
+}
+function resetData(){
+  openModal(
+    '<div class="modal-title">⚠️ تأكيد المسح</div>'+
+    '<p style="color:var(--text-dim);margin-bottom:20px">سيتم مسح كل بياناتك نهائيًا (XP، المهام، الصلاة، الإنجازات). ننصح بعمل Export أولًا. هل أنت متأكد؟</p>'+
+    '<div class="flex gap-10"><button class="btn btn-danger" id="rs-yes">نعم، امسح الكل</button>'+
+    '<button class="btn btn-ghost" id="rs-no">إلغاء</button></div>'
+  );
+  $('rs-yes').addEventListener('click', function(){
+    localStorage.removeItem(STORAGE_KEY);
+    DATA = normalize(defaultData());
+    DATA.today.mainQuests = buildMainQuests();
+    DATA.today.sideQuests = buildSideQuests();
+    save(); updateUI(); closeModal();
+    notify('🗑️ Reset','تم مسح البيانات والبدء من جديد','success');
+  });
+  $('rs-no').addEventListener('click', closeModal);
+}
+
+/* ================= RENDER (FIX #2: isolated) ================= */
+function safe(fn){ try{ fn(); }catch(e){ console.error('SYSTEM render error:', e); } }
+
+function updateUI(){
+  safe(renderTop); safe(renderHero); safe(renderStats); safe(renderAttrs);
+  safe(renderQuick); safe(renderDashQuests); safe(renderMainQuests); safe(renderSideQuests);
+  safe(renderPrayers); safe(renderWorkout); safe(renderSchedule); safe(renderRewards);
+  safe(renderAchievements); safe(renderProgress); safe(renderReport); safe(renderSettings);
+}
+
+function renderTop(){
+  $('top-lvl').textContent = DATA.player.level;
+  $('top-xp').textContent = DATA.player.totalXp;
+  $('top-streak').textContent = DATA.player.streak;
+}
+function renderHero(){
+  $('hero-level').textContent = DATA.player.level;
+  var rank = rankForLevel(DATA.player.level);
+  var hr = $('hero-rank');
+  hr.textContent = rank.name;
+  hr.style.background = 'linear-gradient(90deg,'+rank.color+',#3b82f6)';
+  var needed = xpForLevel(DATA.player.level);
+  $('xp-current').textContent = DATA.player.xp;
+  $('xp-needed').textContent = needed;
+  var pct = Math.min(100, Math.round(DATA.player.xp/needed*100));
+  $('xp-percent').textContent = pct+'%';
+  $('xp-fill').style.width = pct+'%';
+}
+function renderStats(){
+  $('s-totalxp').textContent = DATA.player.totalXp;
+  $('s-streak').textContent = DATA.player.streak;
+  var done = DATA.today.mainQuests.filter(function(q){return q.done}).length +
+             DATA.today.sideQuests.filter(function(q){return q.done}).length;
+  $('s-today').textContent = done;
+  $('s-ach').textContent = Object.keys(DATA.achievements).length;
+}
+function renderAttrs(){
+  var attrs = [
+    {key:'discipline',name:'الانضباط',en:'DISCIPLINE',ic:'🎯'},
+    {key:'knowledge',name:'المعرفة',en:'KNOWLEDGE',ic:'📚'},
+    {key:'strength',name:'القوة',en:'STRENGTH',ic:'💪'},
+    {key:'consistency',name:'الاستمرارية',en:'CONSISTENCY',ic:'🔥'}
+  ];
+  $('attr-list').innerHTML = attrs.map(function(a){
+    var v = Math.max(0,Math.min(100,DATA.attributes[a.key]||0));
+    return '<div class="attr-item"><div class="attr-ic">'+a.ic+'</div><div class="attr-info">'+
+      '<div class="attr-name"><span>'+a.name+'</span><span class="en">'+a.en+' '+v+'</span></div>'+
+      '<div class="attr-bar"><div class="attr-fill" style="width:'+v+'%"></div></div></div></div>';
+  }).join('');
+}
+function renderQuick(){
+  var prayed = PRAYERS.filter(function(p){return DATA.today.prayers[p.key]==='prayed'}).length;
+  $('q-prayers').textContent = prayed+'/5';
+  $('q-workout').textContent = DATA.today.workoutDone?'✓ مكتمل':(DATA.today.workoutRest?'🛌 راحة':'—');
+  var sd = DATA.today.sideQuests.filter(function(q){return q.done}).length;
+  $('q-side').textContent = sd+'/'+Math.max(DATA.today.sideQuests.length,3);
+  $('q-weekly').textContent = Math.round(weekCommittedCount()/7*100)+'%';
+  $('q-rank').textContent = rankForLevel(DATA.player.level).name;
+}
+function questRow(q, isMain){
+  var fn = isMain ? 'toggleMainQuest' : 'toggleSideQuest';
+  var xp = isMain ? (DATA.settings.xpValues[q.xpKey]||20) : DATA.settings.xpValues.sideQuest;
+  return '<div class="quest '+(q.done?'done':'')+'">'+
+    '<div class="quest-check" data-fn="'+fn+'" data-id="'+q.id+'" role="checkbox" aria-checked="'+(!!q.done)+'" tabindex="0">✓</div>'+
+    '<div class="quest-body"><div class="quest-title"></div>'+
+    '<div class="quest-meta"><span class="badge badge-purple">'+(q.cat||q.attr||'quest')+'</span></div></div>'+
+    '<div class="quest-xp">+'+xp+' XP</div>'+
+    '<div class="quest-actions"><button class="quest-action" data-del="'+(isMain?'main':'side')+'" data-id="'+q.id+'" title="حذف">🗑️</button></div>'+
+    '</div>';
+}
+function fillQuestTitles(container, list){
+  var rows = container.querySelectorAll('.quest');
+  for(var i=0;i<rows.length && i<list.length;i++){
+    rows[i].querySelector('.quest-title').textContent = list[i].t;
+  }
+}
+function renderDashQuests(){
+  var list = DATA.today.mainQuests.slice(0,3).concat(DATA.today.sideQuests.slice(0,2));
+  var c = $('dash-quests');
+  if(!list.length){ c.innerHTML = '<p style="color:var(--text-dim)">لا توجد مهام اليوم</p>'; return; }
+  c.innerHTML = list.map(function(q){ return questRow(q, q.id.indexOf('mq')===0); }).join('');
+  fillQuestTitles(c, list);
+}
+function renderMainQuests(){
+  var total = DATA.today.mainQuests.length;
+  var done = DATA.today.mainQuests.filter(function(q){return q.done}).length;
+  var pct = total? Math.round(done/total*100):0;
+  $('dq-done').textContent = done; $('dq-total').textContent = total;
+  $('dq-pct').textContent = pct+'%';
+  $('dq-fill').style.width = pct+'%';
+  var c = $('main-quests');
+  c.innerHTML = DATA.today.mainQuests.map(function(q){return questRow(q,true)}).join('');
+  fillQuestTitles(c, DATA.today.mainQuests);
+}
+function renderSideQuests(){
+  var c = $('side-quests');
+  c.innerHTML = DATA.today.sideQuests.map(function(q){return questRow(q,false)}).join('');
+  fillQuestTitles(c, DATA.today.sideQuests);
+  var done = DATA.today.sideQuests.filter(function(q){return q.done}).length;
+  var msg = $('side-bonus-msg');
+  if(done>=3) msg.innerHTML = '<span class="badge badge-gold">✨ ALL SIDE QUESTS COMPLETE — BONUS MAXED</span>';
+  else if(done>=2) msg.innerHTML = '<span class="badge badge-green">⚡ SIDE QUEST BONUS UNLOCKED</span>';
+  else msg.innerHTML = '<span class="badge badge-purple">أكمل '+(2-done)+' بعد لفتح المكافأة</span>';
+}
+function renderPrayers(){
+  $('prayer-grid').innerHTML = PRAYERS.map(function(p){
+    var v = DATA.today.prayers[p.key];
+    var cls = v==='prayed'?'prayed':(v==='missed'?'missed':'');
+    return '<div class="prayer-card '+cls+'">'+
+      '<div class="prayer-ic">'+p.ic+'</div>'+
+      '<div class="prayer-name">'+p.name+'</div>'+
+      '<div class="prayer-time">'+p.en+'</div>'+
+      '<div class="prayer-btns">'+
+      '<button class="prayer-btn pray '+(v==='prayed'?'active':'')+'" data-prayer="'+p.key+'" data-val="prayed">✓ صليت</button>'+
+      '<button class="prayer-btn miss '+(v==='missed'?'active':'')+'" data-prayer="'+p.key+'" data-val="missed">✗ فاتني</button>'+
+      '</div></div>';
+  }).join('');
+  var prayed = PRAYERS.filter(function(p){return DATA.today.prayers[p.key]==='prayed'}).length;
+  $('prayer-count').textContent = prayed+'/5';
+  $('prayer-fill').style.width = (prayed/5*100)+'%';
+  // week (guarded — FIX #1)
+  var html = '';
+  weekKeys(7).forEach(function(k){
+    var h = dayData(k); if(!h) return;
+    var pr = h.prayers||{};
+    var p = PRAYERS.filter(function(x){return pr[x.key]==='prayed'}).length;
+    var m = PRAYERS.filter(function(x){return pr[x.key]==='missed'}).length;
+    html += '<div class="report-row"><span class="report-label">'+k+(k===todayStr()?' (اليوم)':'')+'</span>'+
+            '<span class="report-val">'+p+'/5'+(m?' <span style="color:var(--neon-red)">فات '+m+'</span>':'')+'</span></div>';
+  });
+  $('prayer-week').innerHTML = html || '<p style="color:var(--text-dim)">لا توجد بيانات بعد</p>';
+}
+function renderWorkout(){
+  var todayIdx = new Date().getDay();
+  var isW = DATA.workoutDays.indexOf(todayIdx)>=0;
+  $('workout-status').textContent = DATA.today.workoutDone?'✓ مكتمل':(isW?'يوم تمرين':'يوم راحة');
+  $('workout-day-info').textContent = isW
+    ? 'جلسة خفيفة 5-10 دقائق — مجموعة واحدة تكفي، والثانية اختيارية. توقف عند الألم أو الدوار.'
+    : 'اليوم راحة — المشي أو التمدد الخفيف اختياريًا. لا XP مفقود: راحتك جزء من الخطة.';
+  $('workout-list').innerHTML = WORKOUT_ROUTINE.map(function(e){
+    return '<div class="exercise"><div class="exercise-visual">'+e.ic+'</div>'+
+      '<div class="exercise-info"><div class="exercise-name">'+e.name+'</div>'+
+      '<div class="exercise-detail">'+e.detail+'</div></div></div>';
+  }).join('');
+  var dayNames = ['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
+  $('workout-days').innerHTML = dayNames.map(function(n,i){
+    var active = DATA.workoutDays.indexOf(i)>=0;
+    return '<button class="btn '+(active?'btn-primary':'btn-ghost')+' btn-sm" data-wday="'+i+'" style="margin:3px">'+n+'</button>';
+  }).join('');
+  var lastW = null;
+  var keys = Object.keys(DATA.history).sort();
+  for(var i=keys.length-1;i>=0;i--){ if(DATA.history[keys[i]] && DATA.history[keys[i]].workoutDone){ lastW = keys[i]; break; } }
+  if(DATA.today.workoutDone) lastW = todayStr();
+  $('last-workout').textContent = lastW||'—';
+  $('week-workouts').textContent = weekKeys(7).filter(function(k){ var h=dayData(k); return h&&h.workoutDone; }).length;
+  $('total-workouts').textContent = DATA.totalWorkouts;
+  $('btn-rest-day').textContent = DATA.today.workoutRest?'▶ إلغاء الراحة':'🛌 REST DAY';
+}
+function renderSchedule(){
+  var all = DEFAULT_SCHEDULE.concat(DATA.customSchedule);
+  var now = new Date(), cur = now.getHours()*60+now.getMinutes();
+  $('schedule-list').innerHTML = all.map(function(s,i){
+    var r = parseRange(s.time), st = r[0], en = r[1];
+    var isCur = (st!==null) && cur>=st && (en===null ? cur<st+60 : cur<en);
+    var del = '';
+    if(i>=DEFAULT_SCHEDULE.length){
+      del = '<button class="quest-action" data-delsch="'+(i-DEFAULT_SCHEDULE.length)+'" title="حذف">🗑️</button>';
+    }
+    return '<div class="schedule-item '+(isCur?'current':'')+'">'+
+      '<div class="schedule-time">'+s.time+'</div>'+
+      '<div class="schedule-ic">'+s.ic+'</div>'+
+      '<div class="schedule-name">'+s.name+'</div>'+del+'</div>';
+  }).join('');
+}
+function renderRewards(){
+  var fantasy = [
+    {ic:'📦',name:'SHADOW CHEST',desc:'صندوق عند إكمال الهدف الأسبوعي'},
+    {ic:'💎',name:'RARE DROP',desc:'مكافأة نادرة لسلسلة إنجازات'},
+    {ic:'⚔️',name:'HUNTER RANK UP',desc:'ترقية رتبتك مع المستويات'},
+    {ic:'✨',name:'SKILL UNLOCKED',desc:'فتح لقب أو مهارة جديدة'},
+    {ic:'🏅',name:'DAILY CLEAR',desc:'ختم يوم كامل المهام'},
+    {ic:'👑',name:'EPIC ACHIEVEMENT',desc:'إنجاز خاص لأهداف طويلة'}
+  ];
+  $('fantasy-rewards').innerHTML = fantasy.map(function(r){
+    return '<div class="reward-card"><div class="reward-ic">'+r.ic+'</div>'+
+      '<div class="reward-name">'+r.name+'</div><div class="reward-desc">'+r.desc+'</div></div>';
+  }).join('');
+  $('real-rewards').innerHTML = DATA.realRewards.length ? DATA.realRewards.map(function(r,i){
+    return '<div class="quest"><div class="quest-body"><div class="quest-title">🎁 '+r.name+'</div></div>'+
+      '<button class="btn btn-ghost btn-sm" data-redeem="'+i+'">استلام</button>'+
+      '<button class="quest-action" data-delreward="'+i+'" title="حذف">🗑️</button></div>';
+  }).join('') : '<p style="color:var(--text-dim)">لم تضف مكافآت واقعية بعد — أضف مكافأة بسيطة تكافئ بها نفسك.</p>';
+  var btn = $('chest-btn');
+  if(DATA.chestOpened){ btn.disabled = true; btn.textContent = '✔ تم فتح صندوق هذا الأسبوع'; }
+  else if(DATA.chestUnlocked){ btn.disabled = false; btn.textContent = '🔓 افتح SHADOW CHEST الآن!'; }
+  else { btn.disabled = false; btn.textContent = '🔒 SHADOW CHEST — التقدم: '+weekTotals()+'/'+WEEK_GOAL+' مهمة'; }
+}
+function renderAchievements(){
+  var ranks = [
+    {name:'E-RANK',lvl:1,color:'#8b92b8',desc:'بداية الرحلة'},
+    {name:'D-RANK',lvl:5,color:'#10b981',desc:'بداية بناء العادات'},
+    {name:'C-RANK',lvl:10,color:'#22d3ee',desc:'الالتزام المتزايد'},
+    {name:'B-RANK',lvl:20,color:'#3b82f6',desc:'الاستمرارية'},
+    {name:'A-RANK',lvl:30,color:'#a855f7',desc:'تقدم ملحوظ'},
+    {name:'S-RANK',lvl:50,color:'#fbbf24',desc:'إنجاز طويل المدى'}
+  ];
+  $('ranks-list').innerHTML = ranks.map(function(r){
+    var on = DATA.player.level>=r.lvl;
+    return '<div style="display:inline-block;padding:10px 15px;margin:4px;border-radius:8px;border:1px solid '+(on?r.color:'var(--border)')+';background:'+(on?r.color+'20':'transparent')+';opacity:'+(on?1:.45)+'">'+
+      '<div style="font-family:Orbitron,sans-serif;color:'+r.color+';font-size:.9rem">'+r.name+'</div>'+
+      '<div style="font-size:.7rem;color:var(--text-dim)">'+r.desc+' — LVL '+r.lvl+'+</div></div>';
+  }).join('');
+  $('ach-grid').innerHTML = ACHIEVEMENTS.map(function(a){
+    var u = DATA.achievements[a.id];
+    return '<div class="ach '+(u?'unlocked':'locked')+'">'+
+      '<div class="ach-ic">'+a.ic+'</div><div class="ach-name">'+a.name+'</div>'+
+      '<div class="ach-desc">'+a.desc+'</div>'+
+      '<div class="ach-cond">'+(u?'✓ فُتح في '+new Date(u.unlockedAt).toLocaleDateString('ar-EG'):'🔒 لم يفتح بعد')+'</div></div>';
+  }).join('');
+}
+var chartInstance = null, chartRange = 7;
+function renderProgress(){
+  $('p-totalxp').textContent = DATA.player.totalXp;
+  $('p-level').textContent = DATA.player.level;
+  $('p-quests').textContent = DATA.totalQuests;
+  $('p-workouts').textContent = DATA.totalWorkouts;
+  $('p-prayers').textContent = DATA.totalPrayers;
+  $('p-ach').textContent = Object.keys(DATA.achievements).length;
+  var notes = Object.keys(DATA.history).sort().reverse().filter(function(k){
+    return DATA.history[k] && DATA.history[k].notes && (DATA.history[k].notes.learned || DATA.history[k].notes.improve);
+  }).slice(0,10);
+  $('notes-log').innerHTML = notes.length ? notes.map(function(k){
+    var n = DATA.history[k].notes;
+    return '<div style="padding:10px;border-bottom:1px solid var(--border)">'+
+      '<div style="color:var(--neon-cyan);font-size:.8rem;font-family:Orbitron,sans-serif">'+k+'</div>'+
+      (n.learned?'<div style="margin-top:5px;font-size:.85rem"><strong>تعلمت:</strong> '+n.learned+'</div>':'')+
+      (n.improve?'<div style="margin-top:3px;font-size:.85rem;color:var(--text-dim)"><strong>تحسين:</strong> '+n.improve+'</div>':'')+
+      '</div>';
+  }).join('') : '<p style="color:var(--text-dim)">لا توجد ملاحظات بعد — اكتبها من صفحة تقرير اليوم.</p>';
+  renderChart();
+}
+function renderChart(){
+  var wrap = $('chart-wrap');
+  if(typeof Chart === 'undefined'){   // FIX #6 offline guard
+    wrap.innerHTML = '<div class="chart-fallback">📊 الرسم البياني يحتاج اتصالًا واحدًا لتحميل مكتبة الرسوم — باقي التطبيق يعمل أوفلاين بالكامل.</div>';
+    return;
+  }
+  if(!wrap.querySelector('canvas')) wrap.innerHTML = '<canvas id="xp-chart"></canvas>';
+  var days = weekKeys(chartRange);
+  var values = days.map(function(k){ var h = dayData(k); return (h && h.xpGained)||0; });
+  var labels = days.map(function(k){
+    var d = new Date(k+'T12:00:00');
+    return d.toLocaleDateString('ar-EG',{weekday:'short',day:'numeric'});
+  });
+  if(chartInstance) chartInstance.destroy();
+  chartInstance = new Chart($('xp-chart'),{
+    type:'line',
+    data:{labels:labels,datasets:[{label:'XP',data:values,
+      borderColor:'#a855f7',backgroundColor:'rgba(168,85,247,.2)',fill:true,tension:.4,
+      pointBackgroundColor:'#22d3ee',pointRadius:4,pointBorderColor:'#22d3ee'}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#e5e7ff'}}},
+      scales:{
+        x:{ticks:{color:'#8b92b8'},grid:{color:'rgba(168,85,247,.1)'}},
+        y:{beginAtZero:true,ticks:{color:'#8b92b8'},grid:{color:'rgba(168,85,247,.1)'}}
+      }}
+  });
+}
+var notesLoadedFor = null;
+function renderReport(){
+  var t = DATA.today;
+  var prayed = PRAYERS.filter(function(p){return t.prayers[p.key]==='prayed'}).length;
+  var missed = PRAYERS.filter(function(p){return t.prayers[p.key]==='missed'}).length;
+  var unreg = 5-prayed-missed;
+  var mainDone = t.mainQuests.filter(function(q){return q.done}).length;
+  var mainTotal = t.mainQuests.length;
+  var sideDone = t.sideQuests.filter(function(q){return q.done}).length;
+  var sideTotal = t.sideQuests.length;
+  var todayXP = t.xpGained||0;
+  var newAch = Object.keys(DATA.achievements).filter(function(id){
+    return new Date(DATA.achievements[id].unlockedAt).toDateString() === new Date().toDateString();
+  }).length;
+  var msg = (mainTotal && mainDone===mainTotal) ? '🏆 يوم ممتاز! التزامك يبني شخصيتك خطوة بخطوة 💪'
+          : (mainDone>=Math.ceil(mainTotal/2)) ? '👍 يوم جيد جدًا — غدًا فرصة لإكمال الباقي'
+          : '💜 كل يوم هو فرصة جديدة — مجرد فتحك للتقرير يعني أنك مهتم، وهذا يكفي اليوم';
+  $('daily-report').innerHTML =
+    '<div class="report-row"><span class="report-label">XP المكتسبة اليوم</span><span class="report-val">+'+todayXP+'</span></div>'+
+    '<div class="report-row"><span class="report-label">المهام الأساسية</span><span class="report-val">'+mainDone+'/'+mainTotal+'</span></div>'+
+    '<div class="report-row"><span class="report-label">المهام الجانبية</span><span class="report-val">'+sideDone+'/'+sideTotal+'</span></div>'+
+    '<div class="report-row"><span class="report-label">صلوات مؤداة</span><span class="report-val">'+prayed+'/5</span></div>'+
+    '<div class="report-row"><span class="report-label">صلوات فاتت</span><span class="report-val">'+missed+'</span></div>'+
+    '<div class="report-row"><span class="report-label">لم تُسجل بعد</span><span class="report-val">'+unreg+'</span></div>'+
+    '<div class="report-row"><span class="report-label">التمرين</span><span class="report-val">'+(t.workoutDone?'✓ مكتمل':(t.workoutRest?'🛌 راحة':'—'))+'</span></div>'+
+    '<div class="report-row"><span class="report-label">إنجازات جديدة اليوم</span><span class="report-val">'+newAch+'</span></div>'+
+    '<div class="report-row"><span class="report-label">المستوى</span><span class="report-val">'+DATA.player.level+'</span></div>'+
+    '<div style="margin-top:15px;padding:15px;background:rgba(168,85,247,.08);border:1px solid var(--border);border-radius:10px;text-align:center;color:var(--neon-cyan)">'+msg+'</div>';
+  // weekly (guarded — FIX #1)
+  var wMain=0,wSide=0,wWork=0,wPray=0;
+  weekKeys(7).forEach(function(k){
+    var h = dayData(k); if(!h) return;
+    wMain += (h.mainQuests||[]).filter(function(q){return q.done}).length;
+    wSide += (h.sideQuests||[]).filter(function(q){return q.done}).length;
+    if(h.workoutDone) wWork++;
+    wPray += PRAYERS.filter(function(p){return (h.prayers||{})[p.key]==='prayed'}).length;
+  });
+  $('weekly-report').innerHTML =
+    '<div class="report-row"><span class="report-label">مهام أساسية</span><span class="report-val">'+wMain+'</span></div>'+
+    '<div class="report-row"><span class="report-label">مهام جانبية</span><span class="report-val">'+wSide+'</span></div>'+
+    '<div class="report-row"><span class="report-label">جلسات تمرين</span><span class="report-val">'+wWork+'</span></div>'+
+    '<div class="report-row"><span class="report-label">صلوات مسجلة</span><span class="report-val">'+wPray+'/35</span></div>'+
+    '<div class="report-row"><span class="report-label">الهدف الأسبوعي</span><span class="report-val">'+weekTotals()+'/'+WEEK_GOAL+'</span></div>';
+  // FIX #8: don't overwrite typing
+  if(notesLoadedFor !== DATA.today.date){
+    $('learned-today').value = (t.notes && t.notes.learned)||'';
+    $('improve-tomorrow').value = (t.notes && t.notes.improve)||'';
+    notesLoadedFor = DATA.today.date;
+  }
+}
+function renderSettings(){
+  $('sw-intro').classList.toggle('on', !!DATA.settings.showIntro);
+  $('sw-sound').classList.toggle('on', !!DATA.settings.sound);
+  $('sw-reduce').classList.toggle('on', !!DATA.settings.reduceMotion);
+  document.body.classList.toggle('reduce', !!DATA.settings.reduceMotion);
+  var map = {mainQuest:'xp-main',workout:'xp-workout',prayer:'xp-prayer',sideQuest:'xp-side',sideBonus:'xp-sidebonus',allDaily:'xp-alldaily',weekly:'xp-weekly'};
+  Object.keys(map).forEach(function(k){
+    var el = $(map[k]);
+    if(el && document.activeElement !== el) el.value = DATA.settings.xpValues[k];
+  });
+}
+
+/* ================= EVENTS (delegation = no dead buttons) ================= */
+document.addEventListener('click', function(ev){
+  var el;
+  el = ev.target.closest('[data-fn]');
+  if(el){ var fn = el.getAttribute('data-fn'), id = el.getAttribute('data-id');
+    if(fn==='toggleMainQuest') toggleMainQuest(id); else toggleSideQuest(id); return; }
+  el = ev.target.closest('[data-del]');
+  if(el){ deleteQuest(el.getAttribute('data-del'), el.getAttribute('data-id')); return; }
+  el = ev.target.closest('[data-prayer]');
+  if(el){ setPrayer(el.getAttribute('data-prayer'), el.getAttribute('data-val')); return; }
+  el = ev.target.closest('[data-wday]');
+  if(el){ toggleWorkoutDay(parseInt(el.getAttribute('data-wday'),10)); return; }
+  el = ev.target.closest('[data-delsch]');
+  if(el){ deleteSchedule(parseInt(el.getAttribute('data-delsch'),10)); return; }
+  el = ev.target.closest('[data-redeem]');
+  if(el){ redeemReward(parseInt(el.getAttribute('data-redeem'),10)); return; }
+  el = ev.target.closest('[data-delreward]');
+  if(el){ deleteReward(parseInt(el.getAttribute('data-delreward'),10)); return; }
+});
+document.addEventListener('keydown', function(ev){
+  if(ev.key===' ' || ev.key==='Enter'){
+    var el = ev.target.closest && ev.target.closest('[data-fn]');
+    if(el){ ev.preventDefault(); el.click(); }
+  }
+});
+
+$('nav').addEventListener('click', function(ev){
+  var item = ev.target.closest('.nav-item'); if(!item) return;
+  var page = item.getAttribute('data-page');
+  document.querySelectorAll('.nav-item').forEach(function(x){x.classList.remove('active')});
+  item.classList.add('active');
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  $('page-'+page).classList.add('active');
+  $('page-title').textContent = PAGE_TITLES[page]||'SYSTEM';
+  if(window.innerWidth<=900) $('sidebar').classList.remove('open');
+  if(page==='progress') setTimeout(function(){ safe(renderChart); },50);
+});
+$('menu-btn').addEventListener('click', function(){ $('sidebar').classList.toggle('open'); });
+$('btn-skip').addEventListener('click', hideIntro);
+$('btn-levelup-ok').addEventListener('click', function(){ $('levelup').classList.remove('show'); });
+$('modal-close').addEventListener('click', closeModal);
+$('modal').addEventListener('click', function(ev){ if(ev.target===$('modal')) closeModal(); });
+
+$('btn-add-main').addEventListener('click', function(){ openAddQuest('main'); });
+$('btn-add-side').addEventListener('click', function(){ openAddQuest('side'); });
+$('btn-refresh-side').addEventListener('click', refreshSideQuests);
+$('btn-start-workout').addEventListener('click', function(){ notify('⚡ WORKOUT STARTED','بالتوفيق — استمع لجسدك','success'); startRestTimer(60); });
+$('btn-complete-workout').addEventListener('click', completeWorkout);
+$('btn-rest-day').addEventListener('click', markRestDay);
+$('btn-rest-30').addEventListener('click', function(){ startRestTimer(30); });
+$('btn-rest-60').addEventListener('click', function(){ startRestTimer(60); });
+$('btn-rest-90').addEventListener('click', function(){ startRestTimer(90); });
+$('btn-rest-stop').addEventListener('click', stopRestTimer);
+$('btn-add-schedule').addEventListener('click', openAddSchedule);
+$('btn-quick-plan').addEventListener('click', quickPlan);
+$('pomo-btn').addEventListener('click', togglePomo);
+$('pomo-reset').addEventListener('click', resetPomo);
+$('btn-add-reward').addEventListener('click', openAddReward);
+$('chest-btn').addEventListener('click', openShadowChest);
+$('btn-save-notes').addEventListener('click', saveDailyNotes);
+$('btn-weekly-review').addEventListener('click', openWeeklyReview);
+$('btn-export').addEventListener('click', exportData);
+$('btn-import').addEventListener('click', function(){ $('import-file').click(); });
+$('import-file').addEventListener('change', importData);
+$('btn-reset').addEventListener('click', resetData);
+$('sw-intro').addEventListener('click', function(){ DATA.settings.showIntro=!DATA.settings.showIntro; save(); updateUI(); });
+$('sw-sound').addEventListener('click', function(){ DATA.settings.sound=!DATA.settings.sound; save(); updateUI(); if(DATA.settings.sound) beep(880,.1); });
+$('sw-reduce').addEventListener('click', function(){ DATA.settings.reduceMotion=!DATA.settings.reduceMotion; save(); updateUI(); });
+document.querySelectorAll('[data-xp]').forEach(function(inp){
+  inp.addEventListener('change', function(){
+    var k = inp.getAttribute('data-xp');
+    var v = parseInt(inp.value,10);
+    if(isNaN(v)||v<0) v=0;
+    DATA.settings.xpValues[k]=v; save();
+    notify('⚙️ تم التحديث','قيمة XP الجديدة: '+v,'success');
+    updateUI();
+  });
+});
+$('chart-tabs').addEventListener('click', function(ev){
+  var t = ev.target.closest('.tab'); if(!t) return;
+  document.querySelectorAll('#chart-tabs .tab').forEach(function(x){x.classList.remove('active')});
+  t.classList.add('active');
+  chartRange = parseInt(t.getAttribute('data-range'),10)||7;
+  safe(renderChart);
+});
+
+/* ================= INTRO (FIX #15) ================= */
+function hideIntro(){
+  $('intro').classList.add('hidden');
+  $('app').classList.add('show');
+  if(DATA.settings.showIntro){ DATA.settings.showIntro=false; save(); safe(renderSettings); }
+}
+function initIntro(){
+  if(!DATA.settings.showIntro){ $('intro').classList.add('hidden'); $('app').classList.add('show'); return; }
+  $('app').classList.add('show');
+  setTimeout(hideIntro, 4500);
+}
+
+/* ================= INIT ================= */
+function init(){
+  checkWeekReset();
+  checkRollover();
+  if(!DATA.today.mainQuests.length) DATA.today.mainQuests = buildMainQuests();
+  if(!DATA.today.sideQuests.length) DATA.today.sideQuests = buildSideQuests();
+  computeStreak();
+  checkWeeklyGoal();
+  checkAchievements();
+  save();
+  updateUI();
+  updatePomoDisplay();
+  initIntro();
+  setInterval(function(){ safe(function(){ checkRollover(); }); }, 60000);
+}
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
